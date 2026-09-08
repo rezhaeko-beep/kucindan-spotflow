@@ -3,10 +3,14 @@
  * Deploy: Deploy → New deployment → Web app
  *   Execute as: Me
  *   Who has access: Anyone
- * Then paste the Web App URL + token into the SpotFlow Kucindan app Settings.
+ * Then paste the Web App URL + token into the SpotFlow Kucindan app Settings
+ * (or into data/sheet-sync.json "url" field).
  *
  * Spreadsheet tabs expected: Transaksi | Absensi | Laporan
  * (created automatically on first write if missing)
+ *
+ * GET ?action=list&tab=Transaksi&lokasi=&limit=50&token=
+ *   → recent rows as JSON (hydrate second phone)
  */
 
 var SECRET_TOKEN = 'spotflow-mop-2026'; // must match token in app Settings
@@ -36,13 +40,9 @@ function ensureSheet_(name, headers) {
 function checkToken_(e) {
   var token = '';
   if (e && e.parameter && e.parameter.token) token = String(e.parameter.token);
-  if (!token && e && e.postData && e.postData.type) {
-    // also allow header X-Spotflow-Token via query only (Apps Script limited)
-  }
   if (!token && e && e.parameter && e.parameter.Authorization) {
     token = String(e.parameter.Authorization).replace(/^Bearer\s+/i, '');
   }
-  // Accept token in JSON body too
   try {
     if (e && e.postData && e.postData.contents) {
       var body = JSON.parse(e.postData.contents);
@@ -52,13 +52,92 @@ function checkToken_(e) {
   return token === SECRET_TOKEN;
 }
 
-function jsonOut_(obj, code) {
+function jsonOut_(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+var HEADERS_TRANSAKSI = [
+  'timestamp', 'lokasi', 'event', 'id', 'plat', 'status', 'tamu', 'wa',
+  'slot', 'jenis', 'metode_bayar', 'jasa_kas', 'tip', 'total', 'petugas',
+  'shift', 'catatan', 'sla_override_alasan'
+];
+var HEADERS_ABSENSI = [
+  'timestamp', 'lokasi', 'event', 'petugas', 'status_dinas', 'catatan'
+];
+var HEADERS_LAPORAN = [
+  'timestamp', 'lokasi', 'periode', 'kendaraan', 'omzet', 'tip', 'catatan'
+];
+
+function sheetToObjects_(sh, limit) {
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return [];
+  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+    return String(h || '').trim();
+  });
+  var start = Math.max(2, lastRow - (limit || 50) + 1);
+  var num = lastRow - start + 1;
+  var values = sh.getRange(start, 1, num, lastCol).getValues();
+  var rows = [];
+  for (var i = 0; i < values.length; i++) {
+    var obj = {};
+    for (var c = 0; c < headers.length; c++) {
+      if (!headers[c]) continue;
+      var v = values[i][c];
+      if (v instanceof Date) v = v.toISOString();
+      obj[headers[c]] = v;
+    }
+    rows.push(obj);
+  }
+  rows.reverse(); // newest first
+  return rows;
+}
+
+function handleList_(e) {
+  if (!checkToken_(e)) {
+    return jsonOut_({ ok: false, error: 'unauthorized' });
+  }
+  var tab = (e.parameter.tab || 'Transaksi').toString();
+  var lokasi = (e.parameter.lokasi || '').toString();
+  var limit = parseInt(e.parameter.limit || '50', 10);
+  if (isNaN(limit) || limit < 1) limit = 50;
+  if (limit > 200) limit = 200;
+
+  var headers = HEADERS_TRANSAKSI;
+  var name = 'Transaksi';
+  if (tab === 'Absensi' || tab === 'absensi') {
+    name = 'Absensi';
+    headers = HEADERS_ABSENSI;
+  } else if (tab === 'Laporan' || tab === 'laporan') {
+    name = 'Laporan';
+    headers = HEADERS_LAPORAN;
+  }
+
+  var sh = ensureSheet_(name, headers);
+  // fetch more than limit if filtering by lokasi
+  var fetchLimit = lokasi ? Math.min(200, limit * 4) : limit;
+  var rows = sheetToObjects_(sh, fetchLimit);
+  if (lokasi) {
+    rows = rows.filter(function (r) {
+      return String(r.lokasi || '') === lokasi;
+    }).slice(0, limit);
+  }
+  return jsonOut_({
+    ok: true,
+    tab: name,
+    lokasi: lokasi || null,
+    count: rows.length,
+    rows: rows
+  });
+}
+
 function doGet(e) {
+  var action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action) : '';
+  if (action === 'list') {
+    return handleList_(e);
+  }
   var ok = checkToken_(e) || (e && e.parameter && e.parameter.ping === '1');
   return jsonOut_({
     ok: true,
@@ -66,7 +145,7 @@ function doGet(e) {
     lokasi: 'MOP',
     time: new Date().toISOString(),
     auth: checkToken_(e),
-    hint: 'POST JSON with token to append rows'
+    hint: 'POST JSON with token to append rows; GET ?action=list&tab=Transaksi&lokasi=&limit=50&token= to hydrate'
   });
 }
 
@@ -81,21 +160,9 @@ function doPost(e) {
     var row = data.row || data;
     var event = (data.event || row.event || 'update').toString();
 
-    var headersTransaksi = [
-      'timestamp', 'lokasi', 'event', 'id', 'plat', 'status', 'tamu', 'wa',
-      'slot', 'jenis', 'metode_bayar', 'jasa_kas', 'tip', 'total', 'petugas',
-      'shift', 'catatan', 'sla_override_alasan'
-    ];
-    var headersAbsensi = [
-      'timestamp', 'lokasi', 'event', 'petugas', 'status_dinas', 'catatan'
-    ];
-    var headersLaporan = [
-      'timestamp', 'lokasi', 'periode', 'kendaraan', 'omzet', 'tip', 'catatan'
-    ];
-
     var sh, values;
     if (tab === 'Absensi' || tab === 'absensi') {
-      sh = ensureSheet_('Absensi', headersAbsensi);
+      sh = ensureSheet_('Absensi', HEADERS_ABSENSI);
       values = [
         row.timestamp || new Date().toISOString(),
         row.lokasi || 'MOP',
@@ -105,7 +172,7 @@ function doPost(e) {
         row.catatan || ''
       ];
     } else if (tab === 'Laporan' || tab === 'laporan') {
-      sh = ensureSheet_('Laporan', headersLaporan);
+      sh = ensureSheet_('Laporan', HEADERS_LAPORAN);
       values = [
         row.timestamp || new Date().toISOString(),
         row.lokasi || 'MOP',
@@ -116,7 +183,7 @@ function doPost(e) {
         row.catatan || ''
       ];
     } else {
-      sh = ensureSheet_('Transaksi', headersTransaksi);
+      sh = ensureSheet_('Transaksi', HEADERS_TRANSAKSI);
       values = [
         row.timestamp || new Date().toISOString(),
         row.lokasi || 'MOP',

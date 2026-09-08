@@ -54,8 +54,8 @@
 
   const CFG_KEY = "spotflow_kucindan_cfg";
   const Q_KEY = "spotflow_kucindan_q";
-  const DEFAULT_TOKEN = "";
-  const DEFAULT_SHEET_ID = "";
+  const DEFAULT_TOKEN = "spotflow-mop-2026";
+  const DEFAULT_SHEET_ID = "1M3bBUqGgzP5VqTBz6Ujoy6n948RJIPAHKv874IWdj50";
   let cfg = loadCfg();
   let queue = loadQueue();
 
@@ -110,6 +110,17 @@
   }
 
   /* ---------- persistence ---------- */
+  function emptyState() {
+    return {
+      activeStaffId: "sapta-hendra",
+      activeLokasi: SITE_DEFAULT,
+      archive: [],
+      tickets: [],
+      bookings: [],
+      attendance: [],
+      shiftOpen: null
+    };
+  }
   function load() {
     try {
       const raw = localStorage.getItem(KEY) || localStorage.getItem("spotflow_kucindan_v1");
@@ -118,7 +129,7 @@
         if (s && Array.isArray(s.tickets)) return normalizeState(s);
       }
     } catch (e) {}
-    return seed();
+    return emptyState();
   }
   function normalizeState(s) {
     if (!s.activeLokasi || !LOCS.includes(s.activeLokasi)) s.activeLokasi = SITE_DEFAULT;
@@ -126,6 +137,7 @@
     if (!Array.isArray(s.archive)) s.archive = [];
     if (!Array.isArray(s.bookings)) s.bookings = [];
     if (!Array.isArray(s.attendance)) s.attendance = [];
+    if (s.shiftOpen === undefined) s.shiftOpen = null;
     for (const ticket of s.tickets) {
       if (!ticket.lokasi) ticket.lokasi = s.activeLokasi;
       if (ticket.slaOverrideAlasan == null) ticket.slaOverrideAlasan = "";
@@ -143,17 +155,40 @@
       const c = JSON.parse(localStorage.getItem(CFG_KEY) || "{}");
       if (!c.token) c.token = DEFAULT_TOKEN;
       if (!c.sheetId) c.sheetId = DEFAULT_SHEET_ID;
+      if (c.url == null) c.url = "";
       return c;
     } catch (e) {
       return { url: "", token: DEFAULT_TOKEN, sheetId: DEFAULT_SHEET_ID };
     }
   }
-  function saveCfg() { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+  function saveCfg() {
+    cfg._userSaved = true;
+    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+  }
   function loadQueue() {
     try { return JSON.parse(localStorage.getItem(Q_KEY) || "[]"); } catch (e) { return []; }
   }
   function saveQueue() { localStorage.setItem(Q_KEY, JSON.stringify(queue)); }
 
+  function ticketSyncRow(t, extra) {
+    return Object.assign({
+      id: (t && (t.id || t.kode)) || "",
+      plat: (t && t.plate) || "",
+      status: (t && t.valetStatus) || "",
+      tamu: (t && t.guestName) || "",
+      wa: (t && t.guestPhone) || "",
+      slot: (t && t.spotId) || "",
+      jenis: (t && t.vehicleType) || "",
+      metode_bayar: (t && t.payment) || "",
+      jasa_kas: t ? (t.fee || 0) : 0,
+      tip: t ? (t.tip || 0) : 0,
+      total: t ? ((t.fee || 0) + (t.tip || 0)) : 0,
+      petugas: (t && t.staff) || ((activeStaff() && activeStaff().name) || ""),
+      shift: (t && t.shift) || shiftOf(),
+      catatan: (t && t.note) || "",
+      sla_override_alasan: (t && t.slaOverrideAlasan) || ""
+    }, extra || {});
+  }
   function syncPayload(event, row, tab) {
     return {
       token: cfg.token || "",
@@ -167,10 +202,21 @@
       }, row)
     };
   }
-  async function postSheets(payload) {
+  async function postSheets(payload, opts) {
+    opts = opts || {};
     if (!cfg.url || !cfg.token) {
       updateSyncChip();
       return { ok: false, skipped: true };
+    }
+    const Sync = window.SpotFlowSync;
+    if (Sync && Sync.postSheets) {
+      const r = await Sync.postSheets(cfg, payload, { noQueue: !!opts.noQueue });
+      if (!r.ok && !r.skipped && !opts.noQueue) {
+        queue = Sync.loadQueue();
+        saveQueue();
+      }
+      updateSyncChip();
+      return r;
     }
     const url = cfg.url + (cfg.url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(cfg.token);
     try {
@@ -182,43 +228,100 @@
       });
       return { ok: true, opaque: true };
     } catch (err) {
-      queue.push({ at: iso(), payload });
-      saveQueue();
+      if (!opts.noQueue) {
+        queue.push({ at: iso(), payload, tries: 0 });
+        saveQueue();
+      }
       updateSyncChip();
       return { ok: false, error: String(err) };
     }
   }
   async function syncEvent(event, row, tab) {
     const payload = syncPayload(event, row, tab);
-    const r = await postSheets(payload);
-    if (r.skipped) return;
-    if (r.ok) toast("Tersimpan · sync Sheets");
-    else toast("Offline · masuk antrian");
-    updateSyncChip();
+    // Always enqueue first so offline/no-cors losses still retry via flush
+    if (cfg.url && cfg.token) {
+      const already = queue.some(q => q.payload && q.payload.event === event &&
+        q.payload.row && row && q.payload.row.id === row.id && q.payload.row.timestamp === payload.row.timestamp);
+      if (!already) {
+        queue.push({ at: iso(), payload, tries: 0 });
+        saveQueue();
+      }
+    }
+    const r = await postSheets(payload, { noQueue: true });
+    if (r.skipped) { updateSyncChip(); return; }
+    if (r.ok) {
+      // drop matching queued item on success
+      queue = queue.filter(q => q.payload !== payload);
+      saveQueue();
+      updateSyncChip();
+    } else {
+      updateSyncChip();
+    }
   }
   async function flushQueue() {
-    if (!cfg.url || !cfg.token || !queue.length) { updateSyncChip(); return; }
+    if (!cfg.url || !cfg.token) { updateSyncChip(); return; }
+    const Sync = window.SpotFlowSync;
+    if (Sync && Sync.flushQueue) {
+      Sync.saveQueue(queue);
+      const r = await Sync.flushQueue(cfg, (left) => { queue = left; updateSyncChip(); });
+      queue = Sync.loadQueue();
+      saveQueue();
+      updateSyncChip();
+      if (queue.length || r.sent) toast(queue.length ? ("Antrian sisa " + queue.length) : "Antrian terkirim");
+      return;
+    }
+    if (!queue.length) { updateSyncChip(); return; }
     const left = [];
     for (const item of queue) {
-      const r = await postSheets(item.payload);
-      if (!r.ok) left.push(item);
+      const tries = (item.tries || 0) + 1;
+      const r = await postSheets(item.payload, { noQueue: true });
+      if (!r.ok && tries < 5) left.push(Object.assign({}, item, { tries }));
     }
     queue = left; saveQueue(); updateSyncChip();
     toast(left.length ? ("Antrian sisa " + left.length) : "Antrian terkirim");
   }
   function updateSyncChip() {
     const el = document.getElementById("syncChip");
-    if (!el) return;
+    const top = document.getElementById("syncChipTop");
+    const set = (node) => {
+      if (!node) return;
+      if (!cfg.url || !cfg.token) {
+        node.textContent = "Sheets: lokal saja";
+        node.className = "sync-chip warn";
+      } else if (queue.length) {
+        node.textContent = "Sheets: antrian " + queue.length;
+        node.className = "sync-chip warn";
+      } else {
+        node.textContent = "Sheets: OK";
+        node.className = "sync-chip ok";
+      }
+    };
+    set(el); set(top);
+    if (top) top.style.display = (!cfg.url || queue.length) ? "" : "none";
+  }
+
+  async function hydrateFromSheet(opts) {
+    opts = opts || {};
+    const Sync = window.SpotFlowSync;
     if (!cfg.url || !cfg.token) {
-      el.textContent = "Sheets: lokal saja";
-      el.className = "sync-chip warn";
-    } else if (queue.length) {
-      el.textContent = "Sheets: antrian " + queue.length;
-      el.className = "sync-chip warn";
-    } else {
-      el.textContent = "Sheets: OK";
-      el.className = "sync-chip ok";
+      if (!opts.silent) toast("Isi Web App URL di Sheets sync dulu");
+      return { ok: false, skipped: true };
     }
+    if (!Sync || !Sync.listFromSheet) {
+      if (!opts.silent) toast("Modul sync belum siap");
+      return { ok: false };
+    }
+    const r = await Sync.listFromSheet(cfg, { tab: "Transaksi", lokasi: currentLokasi(), limit: 50 });
+    if (!r.ok) {
+      if (!opts.silent) toast("Gagal ambil Sheet: " + (r.error || "cors/deploy?"));
+      return r;
+    }
+    const merged = Sync.mergeHydrate(state.tickets, r.rows, currentLokasi());
+    state.tickets = merged.tickets;
+    save();
+    if (!opts.silent) toast(merged.added ? ("Sheet: +" + merged.added + " tiket aktif") : "Sheet: tidak ada tiket baru");
+    if (merged.added) render();
+    return { ok: true, added: merged.added };
   }
 
   function hoursAgo(h) {
@@ -480,6 +583,11 @@
       t.slaOverrideAlasan = (t.slaOverrideAlasan ? t.slaOverrideAlasan + " | " : "") + overrideAlasan;
       t._slaAckStatus = t.valetStatus;
       t.events.push({ at: iso(), label: "SLA override: " + overrideAlasan });
+      syncEvent("sla_override", ticketSyncRow(t, {
+        status: t.valetStatus,
+        catatan: overrideAlasan,
+        sla_override_alasan: t.slaOverrideAlasan
+      }));
     }
     if (col.next === "parkir") {
       openParkModal(t);
@@ -490,16 +598,20 @@
       return;
     }
     const ts = iso();
+    let syncName = null;
     if (col.next === "dipanggil") {
       t.calledAt = ts;
       t.events.push({ at: ts, label: "Dipanggil — petugas menuju slot" });
+      syncName = "panggil";
     }
     if (col.next === "siap") {
       t.readyAt = ts;
       t.events.push({ at: ts, label: "Siap di lobby" });
+      syncName = "siap";
     }
     t.valetStatus = col.next;
     save();
+    if (syncName) syncEvent(syncName, ticketSyncRow(t));
     toast(t.plate + " → " + (COLS.find(c => c.id === t.valetStatus)?.label || t.valetStatus));
     render();
   }
@@ -554,6 +666,7 @@
       save();
       hideModal();
       toast(t.plate + " diparkir di " + slot);
+      syncEvent("parkirkan", ticketSyncRow(t));
       render();
     };
   }
@@ -591,23 +704,13 @@
       save();
       hideModal();
       toast(t.plate + " selesai · " + rp(fee));
-      syncEvent("serahkan_bayar", {
-        id: t.id || t.kode,
-        plat: t.plate,
+      syncEvent("serahkan_bayar", ticketSyncRow(t, {
         status: "selesai",
-        tamu: t.guestName || "",
-        wa: t.guestPhone || "",
-        slot: t.spotId || "",
-        jenis: t.vehicleType || "",
         metode_bayar: payment,
         jasa_kas: fee,
         tip: tip,
-        total: fee + tip,
-        petugas: t.staff || "",
-        shift: t.shift || "",
-        catatan: t.note || "",
-        sla_override_alasan: t.slaOverrideAlasan || ""
-      });
+        total: fee + tip
+      }));
       render();
     };
   }
@@ -658,19 +761,7 @@
       save();
       hideModal();
       toast(plate + " masuk Lobby · kode " + t.kode);
-      syncEvent("terima_kunci", {
-        id: t.id || t.kode,
-        plat: t.plate,
-        status: "lobby",
-        tamu: t.guestName || "",
-        wa: t.guestPhone || "",
-        jenis: t.vehicleType || "",
-        jasa_kas: t.fee || 0,
-        tip: 0,
-        total: t.fee || 0,
-        petugas: t.staff || "",
-        catatan: t.note || ""
-      });
+      syncEvent("terima_kunci", ticketSyncRow(t));
       go("operasi");
       render();
     };
@@ -693,12 +784,13 @@
     state.tickets = state.tickets.filter(t => t.valetStatus !== "selesai");
     save();
     toast(done.length + " tiket diarsipkan · event history tersimpan");
-    syncEvent("archive_completed", {
+    syncEvent("archive", {
       id: "archive-" + Date.now(),
       status: "arsip",
       catatan: done.length + " tiket",
       jasa_kas: done.reduce((s, t) => s + (t.fee || 0), 0),
-      tip: done.reduce((s, t) => s + (t.tip || 0), 0)
+      tip: done.reduce((s, t) => s + (t.tip || 0), 0),
+      total: done.reduce((s, t) => s + (t.fee || 0) + (t.tip || 0), 0)
     }, "Laporan");
     render();
   }
@@ -718,28 +810,49 @@
     const archive = Array.isArray(state.archive) ? state.archive.slice() : [];
     archive.unshift(snap);
     while (archive.length > 20) archive.pop();
-    const fresh = seed();
+    const fresh = emptyState();
     fresh.archive = archive;
     fresh.activeLokasi = SITE_DEFAULT;
     state = fresh;
     save();
-    toast("Data di-wipe · arsip pre-wipe tersimpan lokal");
+    toast("Data di-wipe · kanban kosong · arsip pre-wipe tersimpan");
+    render();
+  }
+
+  function loadDemoData() {
+    if (!confirm("Muat data demo? Tiket aktif saat ini akan diganti contoh demo (roster & lokasi tetap).")) return;
+    const loc = currentLokasi();
+    const staffId = state.activeStaffId;
+    const archive = Array.isArray(state.archive) ? state.archive.slice() : [];
+    const fresh = seed();
+    fresh.activeLokasi = loc;
+    fresh.activeStaffId = staffId;
+    fresh.archive = archive;
+    fresh.shiftOpen = state.shiftOpen || null;
+    state = fresh;
+    save();
+    toast("Demo dimuat · " + state.tickets.filter(t => t.valetStatus !== "selesai").length + " tiket aktif");
     render();
   }
 
   function openArchiveMenu() {
     const nDone = state.tickets.filter(t => t.valetStatus === "selesai").length;
     const nArch = Array.isArray(state.archive) ? state.archive.length : 0;
+    const nAct = activeTickets().length;
     showModal(`
       <h3>Arsip & data</h3>
-      <p style="font-size:13px;color:var(--mut);margin:0 0 12px">Soft-archive: tiket selesai dipindah ke arsip. Event history tidak dihapus. Wipe total butuh konfirmasi ganda.</p>
-      <p style="font-size:13px;margin:0 0 10px"><b>${nDone}</b> tiket selesai · <b>${nArch}</b> batch arsip lokal</p>
+      <p style="font-size:13px;color:var(--mut);margin:0 0 12px">Produksi mulai kosong. Soft-archive: tiket selesai ke arsip. Demo hanya via tombol eksplisit.</p>
+      <p style="font-size:13px;margin:0 0 10px"><b>${nAct}</b> aktif · <b>${nDone}</b> selesai · <b>${nArch}</b> batch arsip</p>
       <button class="btn btn-primary btn-block" type="button" id="archDone">🗂️ Arsipkan tiket selesai</button>
+      <button class="btn btn-block" type="button" id="archDemo" style="margin-top:8px">🧪 Muat demo</button>
+      <button class="btn btn-block" type="button" id="archHydrate" style="margin-top:8px">⬇️ Ambil dari Sheet</button>
       <button class="btn btn-block" type="button" id="archSettings" style="margin-top:8px">⚙️ Pengaturan Sheets</button>
       <button class="btn btn-block" type="button" id="archWipe" style="margin-top:8px;color:var(--bad)">⚠️ Wipe semua (konfirmasi)</button>
       <button class="btn btn-block" type="button" id="archClose" style="margin-top:8px">Tutup</button>
     `);
     document.getElementById("archDone").onclick = () => { hideModal(); archiveCompletedTickets(); };
+    document.getElementById("archDemo").onclick = () => { hideModal(); loadDemoData(); };
+    document.getElementById("archHydrate").onclick = () => { hideModal(); hydrateFromSheet(); };
     document.getElementById("archSettings").onclick = () => { hideModal(); openSettings(); };
     document.getElementById("archWipe").onclick = () => { hideModal(); wipeAllConfirm(); };
     document.getElementById("archClose").onclick = hideModal;
@@ -748,18 +861,19 @@
   function openSettings() {
     showModal(`
       <h3>Pengaturan Sheets</h3>
-      <p style="font-size:13px;color:var(--mut);margin:0 0 10px">Sync opsional ke Google Sheets (pola SpotFlow MOP). Field: token <code>spotflow-mop-2026</code>, sheet <code>1M3bBUqGgzP5VqTBz6Ujoy6n948RJIPAHKv874IWdj50</code> — isi manual (tidak di-hardcode ke Pages). Lihat docs/SHEET-SYNC.md.</p>
+      <p style="font-size:13px;color:var(--mut);margin:0 0 10px">Sheet = sumber kebenaran setoran/events. Prefill dari <code>data/sheet-sync.json</code>; localStorage menang jika sudah disimpan. URL Web App wajib setelah deploy Apps Script. Lihat docs/SHEET-SYNC.md.</p>
       <label>Web App URL</label>
       <input id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(cfg.url || "")}" />
       <label>Token rahasia</label>
       <input id="cfgToken" placeholder="spotflow-mop-2026" value="${esc(cfg.token || "")}" />
       <label>Spreadsheet ID</label>
       <input id="cfgSheetId" placeholder="1M3bBUqGgzP5VqTBz6Ujoy6n948RJIPAHKv874IWdj50" value="${esc(cfg.sheetId || "")}" />
-      <p id="cfgStatus" style="font-size:12px;color:var(--mut);margin:8px 0">Antrian gagal: ${queue.length}${cfg.url ? " · URL tersimpan" : " · belum URL"}</p>
+      <p id="cfgStatus" style="font-size:12px;color:var(--mut);margin:8px 0">Antrian: ${queue.length}${cfg.url ? " · URL OK" : " · URL kosong (deploy dulu)"}</p>
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
         <button class="btn" type="button" id="btnTestSync">Tes koneksi</button>
         <button class="btn btn-primary" type="button" id="btnSaveCfg">Simpan</button>
         <button class="btn" type="button" id="btnRetryQueue">Kirim ulang antrian</button>
+        <button class="btn" type="button" id="btnHydrateCfg">Ambil dari Sheet</button>
       </div>
       <button class="btn btn-block" type="button" id="cfgClose" style="margin-top:10px">Tutup</button>
     `);
@@ -781,6 +895,7 @@
       } catch (e) { toast("Gagal: " + e); }
     };
     document.getElementById("btnRetryQueue").onclick = () => flushQueue();
+    document.getElementById("btnHydrateCfg").onclick = () => { hideModal(); hydrateFromSheet(); };
     document.getElementById("cfgClose").onclick = hideModal;
   }
 
@@ -799,6 +914,52 @@
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  /* ---------- shift open/close ---------- */
+  function openShift() {
+    const petugas = activeStaff().name;
+    const lokasi = currentLokasi();
+    if (state.shiftOpen && state.shiftOpen.open) {
+      toast("Shift sudah terbuka · " + (state.shiftOpen.petugas || ""));
+      return;
+    }
+    state.shiftOpen = { open: true, lokasi, petugas, openedAt: iso(), shift: shiftOf() };
+    save();
+    syncEvent("shift_open", {
+      id: "shift-" + Date.now(),
+      status: "shift_open",
+      petugas,
+      shift: shiftOf(),
+      catatan: "buka shift · " + lokasi
+    }, "Absensi");
+    toast("Shift dibuka · " + lokasi + " · " + petugas);
+    render();
+  }
+  function closeShift() {
+    if (!state.shiftOpen || !state.shiftOpen.open) {
+      toast("Belum ada shift terbuka");
+      return;
+    }
+    const opened = state.shiftOpen;
+    const todayDone = state.tickets.filter(t => t.valetStatus === "selesai" && todayKey(new Date(t.checkOut)) === todayKey() && (t.lokasi || currentLokasi()) === currentLokasi());
+    const omzet = todayDone.reduce((s, t) => s + (t.fee || 0), 0);
+    const tip = todayDone.reduce((s, t) => s + (t.tip || 0), 0);
+    const catatan = "tutup shift · dibuka " + fmtTime(opened.openedAt) + " · " + (opened.petugas || "");
+    syncEvent("shift_close", {
+      periode: todayKey() + " " + (opened.shift || shiftOf()),
+      kendaraan: todayDone.length,
+      omzet,
+      tip,
+      catatan
+    }, "Laporan");
+    state.shiftOpen = Object.assign({}, opened, { open: false, closedAt: iso() });
+    save();
+    toast("Shift ditutup · " + todayDone.length + " tiket · kas " + rpShort(omzet));
+    if (confirm("Unduh CSV setoran shift hari ini?")) {
+      downloadCsv(todayDone, "shift");
+    }
+    render();
   }
 
   /* ---------- renderers ---------- */
@@ -848,15 +1009,23 @@
     const tipToday = todayDone.reduce((s, t) => s + (t.tip || 0), 0);
     const jasaMonth = monthDone.reduce((s, t) => s + (t.fee || 0), 0);
 
+    const shOpen = state.shiftOpen && state.shiftOpen.open;
+    const shLabel = shOpen
+      ? ("Shift buka · " + (state.shiftOpen.petugas || st.name) + " · " + fmtTime(state.shiftOpen.openedAt))
+      : "Shift belum dibuka";
     let html = `
       <div class="page-head">
         <div>
           <p class="eyebrow">Operasi</p>
           <h1>Operasi valet</h1>
-          <p>${esc(currentLokasi())} · ${esc(st.name)} · ${used}/${SLOT_DEFS.length} slot · ambil ~6 mnt</p>
+          <p>${esc(currentLokasi())} · ${esc(st.name)} · ${used}/${SLOT_DEFS.length} slot · ${esc(shLabel)}</p>
         </div>
         <div class="btn-row">
           <button class="btn" type="button" id="btnHp">HP petugas</button>
+          <button class="btn" type="button" id="btnHydrate">⬇️ Ambil dari Sheet</button>
+          ${shOpen
+            ? '<button class="btn" type="button" id="btnShiftClose">📕 Tutup shift</button>'
+            : '<button class="btn" type="button" id="btnShiftOpen">📗 Buka shift</button>'}
           <button class="btn btn-primary" type="button" id="btnTerima">🔑 Terima kunci</button>
         </div>
       </div>`;
@@ -880,6 +1049,12 @@
     document.getElementById("view").innerHTML = html;
     document.getElementById("btnHp").onclick = () => go("pegawai");
     document.getElementById("btnTerima").onclick = receiveKeys;
+    const bh = document.getElementById("btnHydrate");
+    if (bh) bh.onclick = () => hydrateFromSheet();
+    const bso = document.getElementById("btnShiftOpen");
+    if (bso) bso.onclick = openShift;
+    const bsc = document.getElementById("btnShiftClose");
+    if (bsc) bsc.onclick = closeShift;
     document.querySelectorAll(".ticket").forEach(card => {
       const id = card.getAttribute("data-id");
       card.querySelector('[data-act="advance"]').onclick = () => advanceTicket(id);
@@ -959,12 +1134,21 @@
       return { shift: sh, perDay, staff: perDay > 18 ? 2 : 1 };
     });
 
+    const shOpenTim = state.shiftOpen && state.shiftOpen.open;
     document.getElementById("view").innerHTML = `
-      <div class="page-head"><div>
-        <p class="eyebrow">Owner & supervisor</p>
-        <h1>Tim & kualitas</h1>
-        <p>Absensi, booking, anomali, dan saran shift dari data 7 hari.</p>
-      </div></div>
+      <div class="page-head">
+        <div>
+          <p class="eyebrow">Owner & supervisor</p>
+          <h1>Tim & kualitas</h1>
+          <p>Absensi, booking, anomali, saran shift · ${shOpenTim ? "shift terbuka" : "shift tutup"}.</p>
+        </div>
+        <div class="btn-row">
+          ${shOpenTim
+            ? '<button class="btn" type="button" id="btnShiftCloseTim">📕 Tutup shift</button>'
+            : '<button class="btn" type="button" id="btnShiftOpenTim">📗 Buka shift</button>'}
+          <button class="btn" type="button" id="btnHydrateTim">⬇️ Ambil dari Sheet</button>
+        </div>
+      </div>
       <div class="grid2">
         <div class="card">
           <h2>Anomali sekarang</h2>
@@ -1012,6 +1196,12 @@
         </div>
       </div>`;
     document.getElementById("btnOpenBooking").onclick = () => go("booking");
+    const sot = document.getElementById("btnShiftOpenTim");
+    if (sot) sot.onclick = openShift;
+    const sct = document.getElementById("btnShiftCloseTim");
+    if (sct) sct.onclick = closeShift;
+    const ht = document.getElementById("btnHydrateTim");
+    if (ht) ht.onclick = () => hydrateFromSheet();
     document.querySelectorAll("[data-accept]").forEach(btn => {
       btn.onclick = () => {
         const b = state.bookings.find(x => x.id === btn.getAttribute("data-accept"));
@@ -1029,6 +1219,8 @@
         });
         save();
         toast(b.plate + " masuk Lobby");
+        const nt = state.tickets[0];
+        if (nt) syncEvent("terima_kunci", ticketSyncRow(nt, { catatan: "dari_booking" }));
         render();
       };
     });
@@ -1259,6 +1451,29 @@
     (pages[route.page] || renderOperasi)();
   }
 
+  async function applySheetSyncFile() {
+    const Sync = window.SpotFlowSync;
+    if (!Sync || !Sync.loadSheetSyncDefaults) return;
+    const merged = await Sync.loadSheetSyncDefaults();
+    const saved = Sync.loadLocalCfg();
+    // Keep localStorage if user saved OR already has a Web App URL
+    const keepLocal = !!(saved && (saved._userSaved || (saved.url && String(saved.url).trim())));
+    if (keepLocal) {
+      cfg.url = saved.url != null ? saved.url : "";
+      cfg.token = saved.token || merged.token || DEFAULT_TOKEN;
+      cfg.sheetId = saved.sheetId || merged.sheetId || DEFAULT_SHEET_ID;
+      cfg._userSaved = !!saved._userSaved;
+    } else {
+      cfg.url = merged.url || "";
+      cfg.token = merged.token || DEFAULT_TOKEN;
+      cfg.sheetId = merged.sheetId || DEFAULT_SHEET_ID;
+      localStorage.setItem(CFG_KEY, JSON.stringify({
+        url: cfg.url, token: cfg.token, sheetId: cfg.sheetId
+      }));
+    }
+    updateSyncChip();
+  }
+
   function bindShell() {
     document.querySelectorAll("[data-nav]").forEach(btn => {
       btn.onclick = () => {
@@ -1281,6 +1496,7 @@
         save();
         toast("Lokasi: " + locSel.value);
         render();
+        if (cfg.url) hydrateFromSheet({ silent: true });
       };
     }
     document.getElementById("menuToggle").onclick = () => {
@@ -1293,16 +1509,24 @@
     setInterval(() => {
       document.getElementById("topClock").textContent = fmtTime() + " WIB";
     }, 15000);
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    }
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded", async () => {
     // support /lacak?kode= without hash
     const q = new URLSearchParams(location.search);
     if (q.get("kode") && !location.hash.includes("lacak")) {
       location.hash = "#/lacak?kode=" + encodeURIComponent(q.get("kode"));
     }
     if (!location.hash) location.hash = "#/operasi";
+    await applySheetSyncFile();
     bindShell();
     render();
+    // auto-hydrate from Sheet when URL configured (second phone / field)
+    if (cfg.url && cfg.token) {
+      setTimeout(() => hydrateFromSheet({ silent: true }), 800);
+    }
   });
 })();
