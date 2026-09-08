@@ -56,8 +56,12 @@
     localStorage.setItem(Q_KEY, JSON.stringify(q));
   }
 
+  function hasUrl(cfg) {
+    return !!(cfg && cfg.url && String(cfg.url).trim());
+  }
+
   function buildUrl(cfg, params) {
-    if (!cfg || !cfg.url) return "";
+    if (!hasUrl(cfg)) return "";
     const u = new URL(cfg.url, location.href);
     Object.keys(params || {}).forEach((k) => {
       if (params[k] != null && params[k] !== "") u.searchParams.set(k, params[k]);
@@ -66,9 +70,18 @@
     return u.toString();
   }
 
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  function isNetworkError(err) {
+    const s = String(err && err.message ? err.message : err || "");
+    return /failed to fetch|networkerror|network request failed|load failed|typeerror|aborterror/i.test(s);
+  }
+
   async function postSheets(cfg, payload, opts) {
     opts = opts || {};
-    if (!cfg || !cfg.url || !cfg.token) return { ok: false, skipped: true };
+    if (!hasUrl(cfg) || !cfg.token) return { ok: false, skipped: true };
     const url = buildUrl(cfg, {});
     try {
       await fetch(url, {
@@ -88,16 +101,16 @@
     }
   }
 
-  /** Flush offline queue with retry (max 5 attempts per item). */
+  /** Flush offline queue with retry (max 5 attempts per item). Soft-skip if no url. */
   async function flushQueue(cfg, onUpdate) {
-    if (!cfg || !cfg.url || !cfg.token) {
+    if (!hasUrl(cfg) || !cfg.token) {
       if (onUpdate) onUpdate(loadQueue());
-      return { sent: 0, left: loadQueue().length };
+      return { ok: false, skipped: true, sent: 0, left: loadQueue().length };
     }
     let q = loadQueue();
     if (!q.length) {
       if (onUpdate) onUpdate([]);
-      return { sent: 0, left: 0 };
+      return { ok: true, sent: 0, left: 0 };
     }
     const left = [];
     let sent = 0;
@@ -112,36 +125,79 @@
         left.push(Object.assign({}, item, { tries, dead: true }));
       }
       // brief backoff between posts
-      await new Promise((r) => setTimeout(r, 80));
+      await sleep(80);
     }
     // drop dead after reporting once
     const keep = left.filter((x) => !x.dead);
     saveQueue(keep);
     if (onUpdate) onUpdate(keep);
-    return { sent, left: keep.length };
+    return { ok: true, sent, left: keep.length };
   }
 
   /**
    * GET list from Apps Script: ?action=list&tab=Transaksi&lokasi=&limit=50&token=
-   * Uses cors mode when possible; Apps Script redirects may need no-cors fallback (opaque → fail soft).
+   * Retries 1–2 times with backoff on network errors only. Fail-soft when url empty.
    */
   async function listFromSheet(cfg, opts) {
     opts = opts || {};
-    if (!cfg || !cfg.url || !cfg.token) return { ok: false, skipped: true, rows: [] };
+    if (!hasUrl(cfg) || !cfg.token) return { ok: false, skipped: true, rows: [] };
     const url = buildUrl(cfg, {
       action: "list",
       tab: opts.tab || "Transaksi",
       lokasi: opts.lokasi || "",
       limit: String(opts.limit || 50)
     });
+    const maxRetries = opts.retries != null ? Math.max(0, Math.min(2, Number(opts.retries) || 0)) : 2;
+    let lastErr = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await fetch(url, { method: "GET", mode: "cors", credentials: "omit" });
+        if (!res.ok) return { ok: false, error: "HTTP " + res.status, rows: [] };
+        const data = await res.json();
+        if (!data || data.ok === false) return { ok: false, error: (data && data.error) || "list failed", rows: [] };
+        return { ok: true, rows: Array.isArray(data.rows) ? data.rows : [] };
+      } catch (err) {
+        lastErr = err;
+        if (!isNetworkError(err) || attempt >= maxRetries) {
+          return { ok: false, error: String(err), rows: [], network: isNetworkError(err) };
+        }
+        // backoff: 400ms, then 900ms
+        await sleep(400 + attempt * 500);
+      }
+    }
+    return { ok: false, error: String(lastErr || "list failed"), rows: [], network: true };
+  }
+
+  /**
+   * Soft ping: GET ?action=ping (or ?ping=1) with token.
+   * Soft-fail when url empty; opaque no-cors fallback if CORS blocks.
+   */
+  async function ping(cfg, opts) {
+    opts = opts || {};
+    if (!hasUrl(cfg)) return { ok: false, skipped: true };
+    const usePingParam = !!opts.pingParam;
+    const url = usePingParam
+      ? buildUrl(cfg, { ping: "1" })
+      : buildUrl(cfg, { action: "ping" });
     try {
       const res = await fetch(url, { method: "GET", mode: "cors", credentials: "omit" });
-      if (!res.ok) return { ok: false, error: "HTTP " + res.status, rows: [] };
-      const data = await res.json();
-      if (!data || data.ok === false) return { ok: false, error: (data && data.error) || "list failed", rows: [] };
-      return { ok: true, rows: Array.isArray(data.rows) ? data.rows : [] };
+      if (!res.ok) {
+        // try alternate query style once
+        if (!usePingParam) return ping(cfg, { pingParam: true });
+        return { ok: false, soft: true, error: "HTTP " + res.status };
+      }
+      let data = null;
+      try { data = await res.json(); } catch (e) { data = null; }
+      return { ok: true, data: data };
     } catch (err) {
-      return { ok: false, error: String(err), rows: [] };
+      // Soft: fire-and-forget no-cors so field can still "tes koneksi"
+      try {
+        const softUrl = buildUrl(cfg, { ping: "1" });
+        await fetch(softUrl, { method: "GET", mode: "no-cors", credentials: "omit" });
+        return { ok: true, opaque: true, soft: true };
+      } catch (e2) {
+        return { ok: false, soft: true, error: String(err) };
+      }
     }
   }
 
@@ -218,10 +274,12 @@
     saveLocalCfg,
     loadQueue,
     saveQueue,
+    hasUrl,
     buildUrl,
     postSheets,
     flushQueue,
     listFromSheet,
+    ping,
     rowToTicket,
     mergeHydrate
   };

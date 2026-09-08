@@ -58,6 +58,8 @@
   const DEFAULT_SHEET_ID = "1M3bBUqGgzP5VqTBz6Ujoy6n948RJIPAHKv874IWdj50";
   let cfg = loadCfg();
   let queue = loadQueue();
+  /** UI flags for sync chip: syncing / hydrate fail (url empty handled via cfg). */
+  let syncUi = { syncing: false, hydrateFail: false };
 
 
   /* ---------- time helpers (WIB) ---------- */
@@ -259,15 +261,21 @@
     }
   }
   async function flushQueue() {
-    if (!cfg.url || !cfg.token) { updateSyncChip(); return; }
+    if (!cfg.url || !String(cfg.url).trim() || !cfg.token) { updateSyncChip(); return; }
     const Sync = window.SpotFlowSync;
     if (Sync && Sync.flushQueue) {
-      Sync.saveQueue(queue);
-      const r = await Sync.flushQueue(cfg, (left) => { queue = left; updateSyncChip(); });
-      queue = Sync.loadQueue();
-      saveQueue();
+      syncUi.syncing = true;
       updateSyncChip();
-      if (queue.length || r.sent) toast(queue.length ? ("Antrian sisa " + queue.length) : "Antrian terkirim");
+      try {
+        Sync.saveQueue(queue);
+        const r = await Sync.flushQueue(cfg, (left) => { queue = left; updateSyncChip(); });
+        queue = Sync.loadQueue();
+        saveQueue();
+        if (queue.length || r.sent) toast(queue.length ? ("Antrian sisa " + queue.length) : "Antrian terkirim");
+      } finally {
+        syncUi.syncing = false;
+        updateSyncChip();
+      }
       return;
     }
     if (!queue.length) { updateSyncChip(); return; }
@@ -285,11 +293,17 @@
     const top = document.getElementById("syncChipTop");
     const set = (node) => {
       if (!node) return;
-      if (!cfg.url || !cfg.token) {
+      if (!cfg.url || !String(cfg.url).trim() || !cfg.token) {
         node.textContent = "Sheets: lokal saja";
         node.className = "sync-chip warn";
       } else if (queue.length) {
         node.textContent = "Sheets: antrian " + queue.length;
+        node.className = "sync-chip warn";
+      } else if (syncUi.syncing) {
+        node.textContent = "Sheets: sinkron…";
+        node.className = "sync-chip warn";
+      } else if (syncUi.hydrateFail) {
+        node.textContent = "Sheets: hydrate gagal";
         node.className = "sync-chip warn";
       } else {
         node.textContent = "Sheets: OK";
@@ -297,31 +311,58 @@
       }
     };
     set(el); set(top);
-    if (top) top.style.display = (!cfg.url || queue.length) ? "" : "none";
+    if (top) {
+      const show = !cfg.url || !String(cfg.url).trim() || queue.length || syncUi.syncing || syncUi.hydrateFail;
+      top.style.display = show ? "" : "none";
+    }
   }
 
   async function hydrateFromSheet(opts) {
     opts = opts || {};
     const Sync = window.SpotFlowSync;
-    if (!cfg.url || !cfg.token) {
-      if (!opts.silent) toast("Isi Web App URL di Sheets sync dulu");
+    if (!cfg.url || !String(cfg.url).trim() || !cfg.token) {
+      syncUi.hydrateFail = false;
+      syncUi.syncing = false;
+      updateSyncChip();
+      if (!opts.silent) toast("Sheets: lokal saja — isi Web App URL dulu");
       return { ok: false, skipped: true };
     }
     if (!Sync || !Sync.listFromSheet) {
       if (!opts.silent) toast("Modul sync belum siap");
       return { ok: false };
     }
-    const r = await Sync.listFromSheet(cfg, { tab: "Transaksi", lokasi: currentLokasi(), limit: 50 });
-    if (!r.ok) {
-      if (!opts.silent) toast("Gagal ambil Sheet: " + (r.error || "cors/deploy?"));
-      return r;
+    syncUi.syncing = true;
+    syncUi.hydrateFail = false;
+    updateSyncChip();
+    try {
+      const r = await Sync.listFromSheet(cfg, {
+        tab: "Transaksi",
+        lokasi: currentLokasi(),
+        limit: 50,
+        retries: 2
+      });
+      if (!r.ok) {
+        if (r.skipped) {
+          syncUi.hydrateFail = false;
+          updateSyncChip();
+          return r;
+        }
+        syncUi.hydrateFail = true;
+        updateSyncChip();
+        if (!opts.silent) toast("Gagal ambil Sheet: " + (r.error || "cors/deploy?"));
+        return r;
+      }
+      const merged = Sync.mergeHydrate(state.tickets, r.rows, currentLokasi());
+      state.tickets = merged.tickets;
+      save();
+      syncUi.hydrateFail = false;
+      if (!opts.silent) toast(merged.added ? ("Sheet: +" + merged.added + " tiket aktif") : "Sheet: tidak ada tiket baru");
+      if (merged.added) render();
+      return { ok: true, added: merged.added };
+    } finally {
+      syncUi.syncing = false;
+      updateSyncChip();
     }
-    const merged = Sync.mergeHydrate(state.tickets, r.rows, currentLokasi());
-    state.tickets = merged.tickets;
-    save();
-    if (!opts.silent) toast(merged.added ? ("Sheet: +" + merged.added + " tiket aktif") : "Sheet: tidak ada tiket baru");
-    if (merged.added) render();
-    return { ok: true, added: merged.added };
   }
 
   function hoursAgo(h) {
@@ -676,11 +717,17 @@
     showModal(`
       <h3>Serahkan & bayar</h3>
       <p style="margin:0 0 4px;font-weight:800;font-size:20px">${esc(t.plate)}</p>
-      <p style="margin:0 0 12px;color:var(--mut);font-size:13px">${esc(t.guestName)} · ${durLabel(minsBetween(t.checkIn))}</p>
-      <label>Jasa valet</label>
-      <input id="payFee" type="number" value="${t.fee}" />
-      <label>Tip petugas (opsional)</label>
-      <input id="payTip" type="number" value="${t.tip || 0}" />
+      <p style="margin:0 0 12px;color:var(--mut);font-size:13px">${esc(t.guestName)} · ${durLabel(minsBetween(t.checkIn))} · ${esc(t.kode)}</p>
+      <label>Jasa valet <span style="color:var(--teal-d)">(masuk kas / setoran)</span></label>
+      <input id="payFee" type="number" min="0" step="1000" value="${t.fee}" />
+      <label>Tip petugas <span style="color:#b45309">(opsional · bukan kas perusahaan)</span></label>
+      <input id="payTip" type="number" min="0" step="1000" value="${t.tip || 0}" />
+      <div class="pay-split" id="paySplit">
+        <div class="cell kas"><div class="lbl">Jasa → kas</div><div class="val" id="payKasVal">${rp(t.fee)}</div></div>
+        <div class="cell tip"><div class="lbl">Tip petugas</div><div class="val" id="payTipVal">${rp(t.tip || 0)}</div></div>
+        <div class="hint">Tip tidak masuk setoran jasa. Total ditagih ke tamu = jasa + tip.</div>
+      </div>
+      <div class="pay-total"><span>Total tagihan</span><span id="payTotalVal">${rp((t.fee || 0) + (t.tip || 0))}</span></div>
       <label>Metode bayar</label>
       <select id="payMethod">
         <option value="tunai">Tunai</option>
@@ -692,6 +739,15 @@
         <button class="btn btn-primary btn-block" type="button" id="payOk">Selesai</button>
       </div>
     `);
+    const refreshPay = () => {
+      const fee = Number(document.getElementById("payFee").value) || 0;
+      const tip = Number(document.getElementById("payTip").value) || 0;
+      document.getElementById("payKasVal").textContent = rp(fee);
+      document.getElementById("payTipVal").textContent = rp(tip);
+      document.getElementById("payTotalVal").textContent = rp(fee + tip);
+    };
+    document.getElementById("payFee").oninput = refreshPay;
+    document.getElementById("payTip").oninput = refreshPay;
     document.getElementById("payCancel").onclick = hideModal;
     document.getElementById("payOk").onclick = () => {
       const fee = Number(document.getElementById("payFee").value) || t.fee;
@@ -700,10 +756,10 @@
       const ts = iso();
       t.fee = fee; t.tip = tip; t.payment = payment;
       t.checkOut = ts; t.valetStatus = "selesai";
-      t.events.push({ at: ts, label: "Diserahkan & dibayar (" + payment + ")" });
+      t.events.push({ at: ts, label: "Diserahkan & dibayar (" + payment + ") · jasa " + rp(fee) + " · tip " + rp(tip) });
       save();
       hideModal();
-      toast(t.plate + " selesai · " + rp(fee));
+      toast(t.plate + " selesai · kas " + rp(fee) + (tip ? " · tip " + rp(tip) : ""));
       syncEvent("serahkan_bayar", ticketSyncRow(t, {
         status: "selesai",
         metode_bayar: payment,
@@ -887,12 +943,30 @@
       cfg.url = document.getElementById("cfgUrl").value.trim();
       cfg.token = document.getElementById("cfgToken").value.trim() || DEFAULT_TOKEN;
       saveCfg();
-      if (!cfg.url) { toast("Isi Web App URL dulu"); return; }
+      updateSyncChip();
+      const Sync = window.SpotFlowSync;
+      if (!cfg.url) {
+        toast("Sheets: lokal saja — isi Web App URL dulu");
+        return;
+      }
+      syncUi.syncing = true;
+      updateSyncChip();
       try {
-        const u = cfg.url + (cfg.url.includes("?") ? "&" : "?") + "ping=1&token=" + encodeURIComponent(cfg.token || "");
-        await fetch(u, { method: "GET", mode: "no-cors" });
-        toast("Tes dikirim (cek Spreadsheet / log Apps Script)");
+        if (Sync && Sync.ping) {
+          const r = await Sync.ping(cfg);
+          if (r.skipped) toast("Sheets: lokal saja");
+          else if (r.ok) toast(r.opaque ? "Tes dikirim (opaque/no-cors)" : "Ping OK");
+          else toast("Ping gagal soft: " + (r.error || "?"));
+        } else {
+          const u = cfg.url + (cfg.url.includes("?") ? "&" : "?") + "action=ping&token=" + encodeURIComponent(cfg.token || "");
+          await fetch(u, { method: "GET", mode: "no-cors" });
+          toast("Tes dikirim (cek Spreadsheet / log Apps Script)");
+        }
       } catch (e) { toast("Gagal: " + e); }
+      finally {
+        syncUi.syncing = false;
+        updateSyncChip();
+      }
     };
     document.getElementById("btnRetryQueue").onclick = () => flushQueue();
     document.getElementById("btnHydrateCfg").onclick = () => { hideModal(); hydrateFromSheet(); };
@@ -985,14 +1059,24 @@
     else if (t.valetStatus === "parkir") meta = (t.spotId || "—") + " · " + durLabel(minsBetween(t.checkIn)) + " · " + esc(t.staff);
     else if (t.valetStatus === "dipanggil") meta = "Dipanggil " + durLabel(minsBetween(t.calledAt)) + " lalu · " + (t.spotId || "") + " · " + esc(t.staff);
     else meta = durLabel(minsBetween(t.checkIn)) + " · " + esc(t.staff);
+    const breach = ticketSlaBreach(t);
+    const slaClass = breach ? (breach.kind === "dipanggil" ? "sla-bad" : "sla-warn") : "";
+    const slaPill = breach
+      ? `<div class="sla-pill"><span class="pill ${breach.kind === "dipanggil" ? "bad" : "warn"}">SLA +${breach.mins - (breach.kind === "lobby" ? SLA_LOBBY : SLA_PANGGIL)} mnt</span></div>`
+      : "";
+    const spotBit = t.spotId ? " · " + esc(t.spotId) : "";
 
-    return `<article class="ticket" data-id="${t.id}">
-      <div class="plate">${esc(t.plate)}</div>
-      <div class="price">${rp(t.fee)}${t.spotId ? " · " + esc(t.spotId) : ""} · <span class="pill teal">${esc(t.lokasi || currentLokasi())}</span></div>
+    return `<article class="ticket ${slaClass}" data-id="${t.id}" id="ticket-${t.id}">
+      <div class="top">
+        <div class="plate">${esc(t.plate)}</div>
+        <div class="price">${rp(t.fee)}</div>
+      </div>
+      <div class="kode">${esc(t.kode)}${spotBit} · <span class="pill teal">${esc(t.lokasi || currentLokasi())}</span></div>
       <div class="meta">${esc(t.guestName)}${t.guestPhone ? " · " + esc(t.guestPhone) : ""}<br/>${meta}</div>
       ${t.note ? `<div class="note">${esc(t.note)}</div>` : ""}
+      ${slaPill}
       <div class="actions">
-        <button class="btn btn-primary btn-sm" type="button" data-act="advance">${esc(col ? col.action : "Lanjut")}</button>
+        <button class="btn btn-primary btn-sm btn-block" type="button" data-act="advance">${esc(col ? col.action : "Lanjut")}</button>
         <button class="linkish" type="button" data-act="track">Lacak tamu</button>
       </div>
     </article>`;
@@ -1016,7 +1100,7 @@
     let html = `
       <div class="page-head">
         <div>
-          <p class="eyebrow">Operasi</p>
+          <p class="eyebrow">SpotFlow · ${esc(currentLokasi())}</p>
           <h1>Operasi valet</h1>
           <p>${esc(currentLokasi())} · ${esc(st.name)} · ${used}/${SLOT_DEFS.length} slot · ${esc(shLabel)}</p>
         </div>
@@ -1030,12 +1114,12 @@
         </div>
       </div>`;
     if (anoms.length) {
-      html += `<div class="alert-bar">${anoms.map(a => `<span class="chip">${esc(a.text)}</span>`).join("")}</div>`;
+      html += `<div class="alert-bar" id="anomBar">${anoms.map(a => `<button type="button" class="chip" data-anom="${esc(a.id)}">${esc(a.text)}</button>`).join("")}</div>`;
     }
     html += `<div class="kpis">
       <div class="kpi"><div class="label">Valet aktif</div><div class="n">${act.length}</div><div class="sub">Kunci masih di pos.</div></div>
-      <div class="kpi"><div class="label">Kas (jasa) hari ini</div><div class="n">${rpShort(jasaToday)}</div><div class="sub">${todayDone.length} tiket · masuk kas perusahaan</div></div>
-      <div class="kpi"><div class="label">Tip petugas</div><div class="n">${rpShort(tipToday)}</div><div class="sub">Terpisah dari kas / setoran.</div></div>
+      <div class="kpi"><div class="label kas">Jasa hari ini</div><div class="n">${rpShort(jasaToday)}</div><div class="sub">${todayDone.length} tiket selesai · masuk setoran</div></div>
+      <div class="kpi"><div class="label tip">Tip petugas</div><div class="n">${rpShort(tipToday)}</div><div class="sub">Tidak masuk kas perusahaan</div></div>
       <div class="kpi"><div class="label">Jasa bulan ini</div><div class="n">${rpShort(jasaMonth)}</div><div class="sub">${monthDone.length} tiket.</div></div>
     </div>
     <div class="kanban">`;
@@ -1061,6 +1145,16 @@
       card.querySelector('[data-act="track"]').onclick = () => {
         const t = findTicket(id);
         if (t) go("lacak", t.kode);
+      };
+    });
+    document.querySelectorAll("#anomBar [data-anom]").forEach(chip => {
+      chip.onclick = () => {
+        const el = document.getElementById("ticket-" + chip.getAttribute("data-anom"));
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.style.outline = "2px solid var(--warn)";
+          setTimeout(() => { el.style.outline = ""; }, 1600);
+        }
       };
     });
   }
@@ -1152,7 +1246,11 @@
       <div class="grid2">
         <div class="card">
           <h2>Anomali sekarang</h2>
-          ${anoms.length ? anoms.map(a => `<div class="list-row"><span style="color:var(--bad)">${esc(a.text)}</span></div>`).join("") : '<div class="empty">Tidak ada anomali.</div>'}
+          ${anoms.length ? anoms.map(a => `
+            <button type="button" class="anom-card ${a.tone === "warn" ? "warn" : ""}" data-go-ticket="${esc(a.id)}">
+              <div class="ttl">${esc(a.text)}</div>
+              <div class="sub">${a.tone === "danger" ? "SLA panggil terlampaui · wajib alasan override" : "SLA lobby terlampaui · pantau / override"}</div>
+            </button>`).join("") : '<div class="empty">Tidak ada anomali.</div>'}
         </div>
         <div class="card">
           <h2>Absensi hari ini</h2>
@@ -1169,7 +1267,7 @@
           <div class="list-row">
             <div>
               <b>${esc(b.plate)}</b> · ${esc(b.guestName)}
-              <div style="font-size:12px;color:var(--mut)">ETA ${fmtTime(b.eta)} · ${esc(b.note || "—")}</div>
+              <div style="font-size:12px;color:var(--mut)">ETA ${fmtTime(b.eta)} · ${esc(b.lokasi || currentLokasi())} · ${esc(b.note || "—")}</div>
             </div>
             ${b.status === "menunggu"
               ? `<button class="btn btn-primary btn-sm" type="button" data-accept="${b.id}">Terima di lobby</button>`
@@ -1202,6 +1300,19 @@
     if (sct) sct.onclick = closeShift;
     const ht = document.getElementById("btnHydrateTim");
     if (ht) ht.onclick = () => hydrateFromSheet();
+    document.querySelectorAll("[data-go-ticket]").forEach(btn => {
+      btn.onclick = () => {
+        go("operasi");
+        setTimeout(() => {
+          const el = document.getElementById("ticket-" + btn.getAttribute("data-go-ticket"));
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            el.style.outline = "2px solid var(--bad)";
+            setTimeout(() => { el.style.outline = ""; }, 1800);
+          }
+        }, 120);
+      };
+    });
     document.querySelectorAll("[data-accept]").forEach(btn => {
       btn.onclick = () => {
         const b = state.bookings.find(x => x.id === btn.getAttribute("data-accept"));
@@ -1276,8 +1387,8 @@
       </div>
       <div class="kpis">
         <div class="kpi"><div class="label">Tiket selesai</div><div class="n">${list.length}</div><div class="sub">Periode terpilih</div></div>
-        <div class="kpi"><div class="label">Kas (jasa_kas)</div><div class="n">${rpShort(jasa)}</div><div class="sub">${rp(jasa)} · masuk setoran</div></div>
-        <div class="kpi"><div class="label">Tip (bukan kas)</div><div class="n">${rpShort(tip)}</div><div class="sub">${rp(tip)} · tidak disetor sebagai jasa</div></div>
+        <div class="kpi"><div class="label kas">Jasa valet</div><div class="n">${rpShort(jasa)}</div><div class="sub">${rp(jasa)} · masuk setoran (jasa_kas)</div></div>
+        <div class="kpi"><div class="label tip">Tip petugas</div><div class="n">${rpShort(tip)}</div><div class="sub">${rp(tip)} · tidak masuk kas</div></div>
         <div class="kpi"><div class="label">Rata-rata durasi</div><div class="n">${avg} <span style="font-size:14px">mnt</span></div><div class="sub">Check-in → selesai</div></div>
       </div>
       <div class="card">
@@ -1352,25 +1463,34 @@
   }
 
   function renderBooking() {
+    const pending = state.bookings.filter(b => b.status === "menunggu").length;
     document.getElementById("view").innerHTML = `
-      <div class="page-head"><div>
-        <p class="eyebrow">Tamu</p>
-        <h1>Booking valet</h1>
-        <p>Form reservasi untuk tamu ${esc(COMPANY)}.</p>
-      </div></div>
-      <div class="card" style="max-width:480px">
+      <div class="page-head">
+        <div>
+          <p class="eyebrow">Tamu</p>
+          <h1>Booking valet</h1>
+          <p>Reservasi tamu ${esc(COMPANY)} · ${pending} menunggu di Tim.</p>
+        </div>
+        <div class="btn-row">
+          <button class="btn" type="button" id="bkToTim">Lihat di Tim</button>
+        </div>
+      </div>
+      <div class="card" style="max-width:520px">
+        <label class="booking-loc">Lokasi</label>
+        <select id="bkLokasi">${LOCS.map(l => `<option value="${esc(l)}" ${l === currentLokasi() ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
         <label>Plat nomor</label>
-        <input id="bkPlate" placeholder="B 1234 ABC" style="text-transform:uppercase" />
+        <input id="bkPlate" placeholder="B 1234 ABC" style="text-transform:uppercase" autocomplete="off" />
         <label>Nama tamu</label>
         <input id="bkName" placeholder="Bapak / Ibu …" />
         <label>No. WhatsApp</label>
-        <input id="bkPhone" placeholder="08…" />
+        <input id="bkPhone" placeholder="08…" inputmode="tel" />
         <label>ETA (jam lokal)</label>
         <input id="bkEta" type="datetime-local" />
-        <label>Catatan</label>
-        <textarea id="bkNote" rows="2" placeholder="Drop lobby, keperluan, …"></textarea>
+        <label>Catatan drop / keperluan</label>
+        <textarea id="bkNote" rows="2" placeholder="Drop lobby utara, rapat Lt. …"></textarea>
         <button class="btn btn-primary btn-block" type="button" id="bkSave" style="margin-top:14px">Kirim booking</button>
       </div>`;
+    document.getElementById("bkToTim").onclick = () => go("tim");
     const eta = document.getElementById("bkEta");
     const d = now();
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset() + 60);
@@ -1379,17 +1499,24 @@
       const plate = document.getElementById("bkPlate").value.trim().toUpperCase();
       const guestName = document.getElementById("bkName").value.trim();
       if (!plate || !guestName) { toast("Isi plat & nama"); return; }
+      const lokasi = document.getElementById("bkLokasi").value || currentLokasi();
       state.bookings.unshift({
         id: uid("B"), plate, guestName,
         guestPhone: document.getElementById("bkPhone").value.trim(),
         eta: new Date(document.getElementById("bkEta").value || Date.now()).toISOString(),
         note: document.getElementById("bkNote").value.trim(),
+        lokasi,
         status: "menunggu"
       });
       save();
-      toast("Booking tersimpan");
+      toast("Booking tersimpan · " + lokasi);
       go("tim");
     };
+  }
+
+  function trackUrlFor(kode) {
+    const base = location.href.split("#")[0].split("?")[0];
+    return base + "?kode=" + encodeURIComponent(kode) + "#/lacak?kode=" + encodeURIComponent(kode);
   }
 
   function renderLacak() {
@@ -1400,9 +1527,9 @@
       <div class="page-head"><div>
         <p class="eyebrow">Lacak tamu</p>
         <h1>Status kendaraan</h1>
-        <p>Masukkan kode lacak atau plat nomor.</p>
+        <p>Kode lacak / plat · bagikan QR ke tamu.</p>
       </div></div>
-      <div class="card" style="max-width:480px">
+      <div class="card" style="max-width:520px">
         <label>Kode / plat</label>
         <input id="lkQ" value="${esc(route.kode || "")}" placeholder="KC-XXXX atau B 1234 ABC" />
         <button class="btn btn-primary btn-block" type="button" id="lkGo" style="margin-top:12px">Lacak</button>
@@ -1412,11 +1539,23 @@
       const box = document.getElementById("lkResult");
       if (!ticket) { box.innerHTML = '<div class="card empty">Tidak ditemukan. Cek kode / plat.</div>'; return; }
       const statusLabel = ({ lobby: "Di lobby", parkir: "Sedang parkir", dipanggil: "Sedang dipanggil", siap: "Siap di lobby", selesai: "Selesai" })[ticket.valetStatus] || ticket.valetStatus;
+      const url = trackUrlFor(ticket.kode);
+      const qrSrc = "https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=8&data=" + encodeURIComponent(url);
+      const wa = "https://wa.me/?text=" + encodeURIComponent("Lacak valet " + ticket.plate + " (" + ticket.kode + "): " + url);
       box.innerHTML = `
         <div class="track-hero">
           <div class="plate">${esc(ticket.plate)}</div>
-          <div style="margin-top:8px"><span class="pill teal">${esc(statusLabel)}</span></div>
+          <div style="margin-top:8px"><span class="pill teal">${esc(statusLabel)}</span>
+            ${ticket.lokasi ? ' <span class="pill">' + esc(ticket.lokasi) + '</span>' : ""}</div>
           <div style="margin-top:8px;color:var(--mut);font-size:13px">Kode ${esc(ticket.kode)} · ${esc(ticket.guestName)}</div>
+        </div>
+        <div class="track-qr">
+          <img src="${qrSrc}" alt="QR lacak ${esc(ticket.kode)}" width="160" height="160" loading="lazy" />
+          <div class="track-url">${esc(url)}</div>
+          <div class="btn-row" style="justify-content:center">
+            <button class="btn btn-sm" type="button" id="lkCopy">Salin link</button>
+            <a class="btn btn-sm btn-primary" id="lkWa" href="${wa}" target="_blank" rel="noopener">WhatsApp</a>
+          </div>
         </div>
         <div class="card">
           <h2>Timeline</h2>
@@ -1426,6 +1565,15 @@
           </div>
           ${ticket.spotId ? `<p style="font-size:13px;color:var(--mut)">Slot: <b>${esc(ticket.spotId)}</b> · Petugas: ${esc(ticket.staff)}</p>` : ""}
         </div>`;
+      const copyBtn = document.getElementById("lkCopy");
+      if (copyBtn) copyBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          toast("Link lacak disalin");
+        } catch (e) {
+          toast(url);
+        }
+      };
     };
     document.getElementById("lkGo").onclick = () => {
       const q = document.getElementById("lkQ").value.trim();

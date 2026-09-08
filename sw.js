@@ -1,5 +1,5 @@
 /* SpotFlow Kucindan — basic PWA shell cache (do not cache Apps Script) */
-const CACHE = "spotflow-kucindan-shell-v1";
+const CACHE = "spotflow-kucindan-shell-v3";
 const SHELL = [
   "./",
   "./index.html",
@@ -10,6 +10,15 @@ const SHELL = [
   "./icon.svg",
   "./data/sheet-sync.json"
 ];
+
+function isAppsScriptHost(hostname) {
+  return (
+    hostname === "script.google.com" ||
+    hostname === "script.googleusercontent.com" ||
+    hostname.endsWith(".googleusercontent.com") ||
+    hostname.endsWith(".script.google.com")
+  );
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -29,9 +38,9 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.hostname === "script.google.com" || url.hostname.endsWith("googleusercontent.com") ||
-      url.hostname === "script.googleusercontent.com") {
-    return; // network only — never cache Sheets / Apps Script
+  // Never cache Google Apps Script / Sheet endpoints — network only
+  if (isAppsScriptHost(url.hostname) || /script\.google\.com/i.test(url.href)) {
+    return;
   }
   if (url.origin !== self.location.origin) return;
   event.respondWith(
