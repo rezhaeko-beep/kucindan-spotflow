@@ -260,3 +260,18 @@ input, select, textarea {
   .content { padding: 0; }
   body { background: #fff; }
 }
+
+/* Harden field-ops */
+.loc-label { display:block; font-size:11px; font-weight:700; margin:0 0 4px; color:var(--mut); }
+.loc-select {
+  width:100%; margin-bottom:10px; padding:8px 10px; border-radius:10px;
+  border:1px solid var(--line); background:var(--bg2); font:inherit; font-size:13px; font-weight:600;
+}
+.sync-chip {
+  display:inline-block; margin:8px 0 10px; padding:4px 10px; border-radius:999px;
+  font-size:11px; font-weight:700; background:var(--bg2); color:var(--mut); border:1px solid var(--line);
+}
+.sync-chip.ok { background:var(--ok-bg); color:var(--ok); border-color:#bbf7d0; }
+.sync-chip.warn { background:var(--warn-bg); color:#b45309; border-color:var(--warn-bd); }
+.side-foot button { display:block; margin-bottom:6px; }
+.modal code { font-size:11px; background:var(--bg2); padding:1px 4px; border-radius:4px; }

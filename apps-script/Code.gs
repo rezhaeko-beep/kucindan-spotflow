@@ -9,8 +9,8 @@
  * (created automatically on first write if missing)
  */
 
-var SECRET_TOKEN = 'GANTI_TOKEN_RAHASIA'; // must match token in app Settings
-var SPREADSHEET_ID = ''; // leave empty to use the spreadsheet bound to this script
+var SECRET_TOKEN = 'spotflow-mop-2026'; // must match token in app Settings
+var SPREADSHEET_ID = '1M3bBUqGgzP5VqTBz6Ujoy6n948RJIPAHKv874IWdj50'; // SpotFlow Kucindan / MOP shared sheet
 
 function getSpreadsheet_() {
   if (SPREADSHEET_ID) return SpreadsheetApp.openById(SPREADSHEET_ID);

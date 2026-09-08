@@ -31,10 +31,14 @@
       <button class="nav-btn" type="button" data-nav="booking"><span class="ico">📝</span> Booking</button>
       <button class="nav-btn" type="button" data-nav="lacak"><span class="ico">🔎</span> Lacak</button>
       <div class="side-foot">
-        <button type="button" id="btnReset">Arsip & muat demo</button>
+        <label class="loc-label" for="locSelect">Lokasi lapangan</label>
+        <select id="locSelect" class="loc-select" aria-label="Lokasi lapangan"></select>
+        <button type="button" id="btnSettings">⚙️ Sheets sync</button>
+        <button type="button" id="btnReset">🗂️ Arsip tiket selesai</button>
+        <div class="sync-chip warn" id="syncChip">Sheets: lokal saja</div>
         <div><b>PT Kucindan Usaha Pratama</b></div>
-        <div>Multi-lokasi · Valet 06.00–22.00</div>
-        <div style="margin-top:6px;font-size:11px">Sheet sync: docs/SHEET-SYNC.md</div>
+        <div>Multi-lokasi · 06.00–22.00</div>
+        <div style="margin-top:4px;font-size:11px">Roster menunggu daftar final Septiawan</div>
       </div>
     </aside>
 
@@ -42,13 +46,14 @@
       <header class="topbar">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <button class="menu-toggle" type="button" id="menuToggle" aria-label="Menu">☰ Menu</button>
-          <label class="muted" style="margin:0;font-size:11px" for="locSelect">Lokasi</label>
-          <select id="locSelect" style="width:auto;min-width:140px;padding:6px 10px;font-size:13px;border-radius:10px"></select>
           <span id="topDate">—</span>
           <span>·</span>
           <span id="topShift">—</span>
         </div>
-        <div class="clock" id="topClock">—</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="sync-chip warn" id="syncChipTop" style="display:none"></span>
+          <div class="clock" id="topClock">—</div>
+        </div>
       </header>
       <main class="content" id="view"></main>
     </div>

@@ -6,8 +6,8 @@
   const COMPANY = "PT Kucindan Usaha Pratama";
   const HOURS = "06.00–22.00";
   const LOCS = [
-    "MOP", "Sate Maranggi", "Lyma Brisket", "Kalimalang", "Pasar Minggu",
-    "Enablerspace", "Taman Teras Tebet", "Bakmi Berdikari", "RSKM 1", "RSKM 2", "Kantor / Office"
+    "MOP", "Sate Maranggi", "Lyma Brisket", "Taman Teras Tebet",
+    "Bakmi Berdikari", "Pasar Minggu", "Kalimalang"
   ];
   const SITE_DEFAULT = "MOP";
   const FEE = 35000;
@@ -19,12 +19,8 @@
     { id: "sapta", name: "Sapta", role: "Valet" },
     { id: "topan", name: "Topan", role: "Valet" },
     { id: "arfan", name: "Arfan", role: "Valet" },
-    { id: "riyo", name: "Riyo Nardo", role: "Valet" },
-    { id: "dwijo", name: "Dwijo Kusdaryanto", role: "Valet" },
-    { id: "hermansyah", name: "O Hermansyah", role: "BD / lapangan" },
-    { id: "tania", name: "Tania Inria Pramesta", role: "HQ / kas & setoran" },
-    { id: "mop1", name: "Petugas Lokasi 1", role: "Placeholder — ganti daftar Septiawan" },
-    { id: "mop2", name: "Petugas Lokasi 2", role: "Placeholder — ganti daftar Septiawan" }
+    { id: "mop1", name: "Petugas MOP 1", role: "Menunggu daftar final Septiawan" },
+    { id: "mop2", name: "Petugas MOP 2", role: "Menunggu daftar final Septiawan" }
   ];
 
   const SLOT_DEFS = [
@@ -55,6 +51,14 @@
   let state = load();
   let route = { page: "operasi", kode: null };
   let payDraft = null;
+
+  const CFG_KEY = "spotflow_kucindan_cfg";
+  const Q_KEY = "spotflow_kucindan_q";
+  const DEFAULT_TOKEN = "";
+  const DEFAULT_SHEET_ID = "";
+  let cfg = loadCfg();
+  let queue = loadQueue();
+
 
   /* ---------- time helpers (WIB) ---------- */
   function now() { return new Date(); }
@@ -134,6 +138,89 @@
   function save() {
     localStorage.setItem(KEY, JSON.stringify(state));
   }
+  function loadCfg() {
+    try {
+      const c = JSON.parse(localStorage.getItem(CFG_KEY) || "{}");
+      if (!c.token) c.token = DEFAULT_TOKEN;
+      if (!c.sheetId) c.sheetId = DEFAULT_SHEET_ID;
+      return c;
+    } catch (e) {
+      return { url: "", token: DEFAULT_TOKEN, sheetId: DEFAULT_SHEET_ID };
+    }
+  }
+  function saveCfg() { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+  function loadQueue() {
+    try { return JSON.parse(localStorage.getItem(Q_KEY) || "[]"); } catch (e) { return []; }
+  }
+  function saveQueue() { localStorage.setItem(Q_KEY, JSON.stringify(queue)); }
+
+  function syncPayload(event, row, tab) {
+    return {
+      token: cfg.token || "",
+      tab: tab || "Transaksi",
+      event: event,
+      row: Object.assign({
+        timestamp: iso(),
+        lokasi: currentLokasi(),
+        petugas: (activeStaff() && activeStaff().name) || "",
+        sheetId: cfg.sheetId || DEFAULT_SHEET_ID
+      }, row)
+    };
+  }
+  async function postSheets(payload) {
+    if (!cfg.url || !cfg.token) {
+      updateSyncChip();
+      return { ok: false, skipped: true };
+    }
+    const url = cfg.url + (cfg.url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(cfg.token);
+    try {
+      await fetch(url, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload)
+      });
+      return { ok: true, opaque: true };
+    } catch (err) {
+      queue.push({ at: iso(), payload });
+      saveQueue();
+      updateSyncChip();
+      return { ok: false, error: String(err) };
+    }
+  }
+  async function syncEvent(event, row, tab) {
+    const payload = syncPayload(event, row, tab);
+    const r = await postSheets(payload);
+    if (r.skipped) return;
+    if (r.ok) toast("Tersimpan · sync Sheets");
+    else toast("Offline · masuk antrian");
+    updateSyncChip();
+  }
+  async function flushQueue() {
+    if (!cfg.url || !cfg.token || !queue.length) { updateSyncChip(); return; }
+    const left = [];
+    for (const item of queue) {
+      const r = await postSheets(item.payload);
+      if (!r.ok) left.push(item);
+    }
+    queue = left; saveQueue(); updateSyncChip();
+    toast(left.length ? ("Antrian sisa " + left.length) : "Antrian terkirim");
+  }
+  function updateSyncChip() {
+    const el = document.getElementById("syncChip");
+    if (!el) return;
+    if (!cfg.url || !cfg.token) {
+      el.textContent = "Sheets: lokal saja";
+      el.className = "sync-chip warn";
+    } else if (queue.length) {
+      el.textContent = "Sheets: antrian " + queue.length;
+      el.className = "sync-chip warn";
+    } else {
+      el.textContent = "Sheets: OK";
+      el.className = "sync-chip ok";
+    }
+  }
+
   function hoursAgo(h) {
     return new Date(now().getTime() - h * 3600000).toISOString();
   }
@@ -226,7 +313,7 @@
       {
         id: uid("T"), kode: "KC-CALL02", plate: "B 2201 WW", guestName: "Ibu Nina", guestPhone: "0812-9000-9999",
         vehicleType: "mobil", fee: FEE, tip: 10000, note: "", lokasi: "Kalimalang",
-        valetStatus: "dipanggil", spotId: "V-07", staff: "Riyo Nardo", slaOverrideAlasan: "",
+        valetStatus: "dipanggil", spotId: "V-07", staff: "Petugas MOP 1", slaOverrideAlasan: "",
         checkIn: hoursAgo(0.9), parkedAt: hoursAgo(0.8), calledAt: minsAgo(4), readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(0.9)), events: [
           { at: hoursAgo(0.9), label: "Kunci diterima di lobby · Kalimalang" },
@@ -249,7 +336,7 @@
       {
         id: uid("T"), kode: "KC-READY2", plate: "B 1199 ZZ", guestName: "Ibu Rina Hartono", guestPhone: "0813-2222-0002",
         vehicleType: "mobil", fee: FEE, tip: 5000, note: "Drop lobby utara.", lokasi: "Pasar Minggu",
-        valetStatus: "siap", spotId: "V-08", staff: "Dwijo Kusdaryanto", slaOverrideAlasan: "",
+        valetStatus: "siap", spotId: "V-08", staff: "Petugas MOP 2", slaOverrideAlasan: "",
         checkIn: hoursAgo(2.5), parkedAt: hoursAgo(2.4), calledAt: minsAgo(25), readyAt: minsAgo(12), checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(2.5)), events: [
           { at: hoursAgo(2.5), label: "Kunci diterima di lobby · Pasar Minggu" },
@@ -261,7 +348,7 @@
     ];
 
     const hist = [];
-    const histLocs = ["MOP", "Sate Maranggi", "Lyma Brisket", "Kalimalang", "Pasar Minggu"];
+    const histLocs = ["MOP", "Sate Maranggi", "Lyma Brisket", "Taman Teras Tebet", "Bakmi Berdikari", "Pasar Minggu", "Kalimalang"];
     for (let i = 0; i < 18; i++) {
       const agoH = 8 + i * 7;
       const checkIn = hoursAgo(agoH + 1.5);
@@ -504,6 +591,23 @@
       save();
       hideModal();
       toast(t.plate + " selesai · " + rp(fee));
+      syncEvent("serahkan_bayar", {
+        id: t.id || t.kode,
+        plat: t.plate,
+        status: "selesai",
+        tamu: t.guestName || "",
+        wa: t.guestPhone || "",
+        slot: t.spotId || "",
+        jenis: t.vehicleType || "",
+        metode_bayar: payment,
+        jasa_kas: fee,
+        tip: tip,
+        total: fee + tip,
+        petugas: t.staff || "",
+        shift: t.shift || "",
+        catatan: t.note || "",
+        sla_override_alasan: t.slaOverrideAlasan || ""
+      });
       render();
     };
   }
@@ -554,32 +658,130 @@
       save();
       hideModal();
       toast(plate + " masuk Lobby · kode " + t.kode);
+      syncEvent("terima_kunci", {
+        id: t.id || t.kode,
+        plat: t.plate,
+        status: "lobby",
+        tamu: t.guestName || "",
+        wa: t.guestPhone || "",
+        jenis: t.vehicleType || "",
+        jasa_kas: t.fee || 0,
+        tip: 0,
+        total: t.fee || 0,
+        petugas: t.staff || "",
+        catatan: t.note || ""
+      });
       go("operasi");
       render();
     };
   }
 
-  function resetDemo() {
-    if (!confirm("Arsipkan data aktif & muat ulang demo? Data lama tidak dihapus (soft-archive).")) return;
+  function archiveCompletedTickets() {
+    const done = state.tickets.filter(t => t.valetStatus === "selesai");
+    if (!done.length) { toast("Tidak ada tiket selesai untuk diarsipkan"); return; }
+    if (!confirm("Arsipkan " + done.length + " tiket selesai? Tiket aktif & riwayat event tetap ada.")) return;
     const snap = {
       at: iso(),
-      activeLokasi: state.activeLokasi,
-      activeStaffId: state.activeStaffId,
+      kind: "completed",
+      activeLokasi: currentLokasi(),
+      tickets: done.map(t => Object.assign({}, t, { events: (t.events || []).slice() }))
+    };
+    if (!Array.isArray(state.archive)) state.archive = [];
+    state.archive.unshift(snap);
+    while (state.archive.length > 20) state.archive.pop();
+    // keep aktif + event history on aktif; remove only completed from working list
+    state.tickets = state.tickets.filter(t => t.valetStatus !== "selesai");
+    save();
+    toast(done.length + " tiket diarsipkan · event history tersimpan");
+    syncEvent("archive_completed", {
+      id: "archive-" + Date.now(),
+      status: "arsip",
+      catatan: done.length + " tiket",
+      jasa_kas: done.reduce((s, t) => s + (t.fee || 0), 0),
+      tip: done.reduce((s, t) => s + (t.tip || 0), 0)
+    }, "Laporan");
+    render();
+  }
+
+  function wipeAllConfirm() {
+    if (!confirm("HAPUS SEMUA data lokal (termasuk arsip)? Tindakan ini tidak bisa dibatalkan.")) return;
+    if (!confirm("Yakin total wipe? Ketik OK di langkah berikutnya tidak tersedia — konfirmasi lagi.")) return;
+    // soft-keep last snapshot then seed
+    const snap = {
+      at: iso(),
+      kind: "pre_wipe",
       tickets: state.tickets,
       bookings: state.bookings,
-      attendance: state.attendance
+      attendance: state.attendance,
+      archive: state.archive
     };
     const archive = Array.isArray(state.archive) ? state.archive.slice() : [];
     archive.unshift(snap);
-    // keep last 10 archives
-    while (archive.length > 10) archive.pop();
+    while (archive.length > 20) archive.pop();
     const fresh = seed();
     fresh.archive = archive;
-    fresh.activeLokasi = state.activeLokasi || SITE_DEFAULT;
+    fresh.activeLokasi = SITE_DEFAULT;
     state = fresh;
     save();
-    toast("Demo dimuat · " + archive.length + " arsip tersimpan");
+    toast("Data di-wipe · arsip pre-wipe tersimpan lokal");
     render();
+  }
+
+  function openArchiveMenu() {
+    const nDone = state.tickets.filter(t => t.valetStatus === "selesai").length;
+    const nArch = Array.isArray(state.archive) ? state.archive.length : 0;
+    showModal(`
+      <h3>Arsip & data</h3>
+      <p style="font-size:13px;color:var(--mut);margin:0 0 12px">Soft-archive: tiket selesai dipindah ke arsip. Event history tidak dihapus. Wipe total butuh konfirmasi ganda.</p>
+      <p style="font-size:13px;margin:0 0 10px"><b>${nDone}</b> tiket selesai · <b>${nArch}</b> batch arsip lokal</p>
+      <button class="btn btn-primary btn-block" type="button" id="archDone">🗂️ Arsipkan tiket selesai</button>
+      <button class="btn btn-block" type="button" id="archSettings" style="margin-top:8px">⚙️ Pengaturan Sheets</button>
+      <button class="btn btn-block" type="button" id="archWipe" style="margin-top:8px;color:var(--bad)">⚠️ Wipe semua (konfirmasi)</button>
+      <button class="btn btn-block" type="button" id="archClose" style="margin-top:8px">Tutup</button>
+    `);
+    document.getElementById("archDone").onclick = () => { hideModal(); archiveCompletedTickets(); };
+    document.getElementById("archSettings").onclick = () => { hideModal(); openSettings(); };
+    document.getElementById("archWipe").onclick = () => { hideModal(); wipeAllConfirm(); };
+    document.getElementById("archClose").onclick = hideModal;
+  }
+
+  function openSettings() {
+    showModal(`
+      <h3>Pengaturan Sheets</h3>
+      <p style="font-size:13px;color:var(--mut);margin:0 0 10px">Sync opsional ke Google Sheets (lihat docs/SHEET-SYNC.md). Isi Web App URL + token Apps Script di perangkat ini.</p>
+      <label>Web App URL</label>
+      <input id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(cfg.url || "")}" />
+      <label>Token rahasia</label>
+      <input id="cfgToken" placeholder="SECRET_TOKEN" value="${esc(cfg.token || DEFAULT_TOKEN)}" />
+      <label>Spreadsheet ID</label>
+      <input id="cfgSheetId" value="${esc(cfg.sheetId || DEFAULT_SHEET_ID)}" />
+      <p id="cfgStatus" style="font-size:12px;color:var(--mut);margin:8px 0">Antrian gagal: ${queue.length}${cfg.url ? " · URL tersimpan" : " · belum URL"}</p>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn" type="button" id="btnTestSync">Tes koneksi</button>
+        <button class="btn btn-primary" type="button" id="btnSaveCfg">Simpan</button>
+        <button class="btn" type="button" id="btnRetryQueue">Kirim ulang antrian</button>
+      </div>
+      <button class="btn btn-block" type="button" id="cfgClose" style="margin-top:10px">Tutup</button>
+    `);
+    document.getElementById("btnSaveCfg").onclick = () => {
+      cfg.url = document.getElementById("cfgUrl").value.trim();
+      cfg.token = document.getElementById("cfgToken").value.trim() || DEFAULT_TOKEN;
+      cfg.sheetId = document.getElementById("cfgSheetId").value.trim() || DEFAULT_SHEET_ID;
+      saveCfg(); updateSyncChip(); toast("Pengaturan disimpan");
+    };
+    document.getElementById("btnTestSync").onclick = async () => {
+      cfg.url = document.getElementById("cfgUrl").value.trim();
+      cfg.token = document.getElementById("cfgToken").value.trim() || DEFAULT_TOKEN;
+      saveCfg();
+      if (!cfg.url) { toast("Isi Web App URL dulu"); return; }
+      try {
+        const u = cfg.url + (cfg.url.includes("?") ? "&" : "?") + "ping=1&token=" + encodeURIComponent(cfg.token || "");
+        await fetch(u, { method: "GET", mode: "no-cors" });
+        toast("Tes dikirim (cek Spreadsheet / log Apps Script)");
+      } catch (e) { toast("Gagal: " + e); }
+    };
+    document.getElementById("btnRetryQueue").onclick = () => flushQueue();
+    document.getElementById("cfgClose").onclick = hideModal;
   }
 
   /* ---------- modal ---------- */
@@ -651,7 +853,7 @@
         <div>
           <p class="eyebrow">Operasi</p>
           <h1>Operasi valet</h1>
-          <p>${esc(st.name)} · ${used}/${SLOT_DEFS.length} slot · ambil ~6 mnt</p>
+          <p>${esc(currentLokasi())} · ${esc(st.name)} · ${used}/${SLOT_DEFS.length} slot · ambil ~6 mnt</p>
         </div>
         <div class="btn-row">
           <button class="btn" type="button" id="btnHp">HP petugas</button>
@@ -693,7 +895,7 @@
       <div class="page-head"><div>
         <p class="eyebrow">HP petugas</p>
         <h1>Pilih pegawai</h1>
-        <p>Roster sementara (tim Septiawan / Saptahendra). Placeholder diganti setelah daftar resmi.</p>
+        <p>Roster lapangan · menunggu daftar final Septiawan. Leader: Saptahendra Septiansyah.</p>
       </div></div>
       <div class="staff-grid">
         ${STAFF.map(s => `
@@ -948,6 +1150,13 @@
     a.click();
     URL.revokeObjectURL(a.href);
     toast("CSV setoran diunduh (jasa_kas ≠ tip)");
+    syncEvent("export_setoran", {
+      periode: period,
+      kendaraan: list.length,
+      omzet: list.reduce((s, t) => s + (t.fee || 0), 0),
+      tip: list.reduce((s, t) => s + (t.tip || 0), 0),
+      catatan: "export_csv_setoran"
+    }, "Laporan");
   }
 
   function renderBooking() {
@@ -1056,8 +1265,13 @@
         go(btn.getAttribute("data-nav"));
       };
     });
-    document.getElementById("btnReset").onclick = resetDemo;
-    document.getElementById("btnResetMobile") && (document.getElementById("btnResetMobile").onclick = resetDemo);
+    document.getElementById("btnReset").onclick = openArchiveMenu;
+    document.getElementById("btnResetMobile") && (document.getElementById("btnResetMobile").onclick = openArchiveMenu);
+    const btnSettings = document.getElementById("btnSettings");
+    if (btnSettings) btnSettings.onclick = openSettings;
+    updateSyncChip();
+    window.addEventListener("online", flushQueue);
+    setTimeout(flushQueue, 1500);
     const locSel = document.getElementById("locSelect");
     if (locSel) {
       locSel.innerHTML = LOCS.map(l => `<option value="${l}">${l}</option>`).join("");
