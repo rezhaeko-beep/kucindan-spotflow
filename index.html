@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <meta name="description" content="SpotFlow Kucindan — parkir + valet operasional PT Kucindan Usaha Pratama" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="SpotFlow Kucindan" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <title>SpotFlow Kucindan · PT Kucindan Usaha Pratama</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">SF</div>
+        <div>
+          <strong>SpotFlow</strong>
+          <span>Kucindan · valet tanpa ribet</span>
+        </div>
+      </div>
+      <button class="nav-btn" type="button" data-nav="operasi"><span class="ico">🗂️</span> Operasi</button>
+      <button class="nav-btn" type="button" data-nav="pegawai"><span class="ico">📱</span> HP</button>
+      <button class="nav-btn" type="button" data-nav="slot"><span class="ico">🅿️</span> Slot</button>
+      <button class="nav-btn" type="button" data-nav="tim"><span class="ico">👥</span> Tim</button>
+      <button class="nav-btn" type="button" data-nav="laporan"><span class="ico">📊</span> Laporan</button>
+      <button class="nav-btn" type="button" data-nav="booking"><span class="ico">📝</span> Booking</button>
+      <button class="nav-btn" type="button" data-nav="lacak"><span class="ico">🔎</span> Lacak</button>
+      <div class="side-foot">
+        <button type="button" id="btnReset">Reset data demo</button>
+        <div><b>PT Kucindan Usaha Pratama</b></div>
+        <div>Kucindan Valet · 06.00–22.00</div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="menu-toggle" type="button" id="menuToggle" aria-label="Menu">☰ Menu</button>
+          <span id="topDate">—</span>
+          <span>·</span>
+          <span id="topShift">—</span>
+        </div>
+        <div class="clock" id="topClock">—</div>
+      </header>
+      <main class="content" id="view"></main>
+    </div>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Menu bawah">
+    <button type="button" data-nav="operasi"><span>🗂️</span>Operasi</button>
+    <button type="button" data-nav="pegawai"><span>📱</span>HP</button>
+    <button type="button" data-nav="slot"><span>🅿️</span>Slot</button>
+    <button type="button" data-nav="tim"><span>👥</span>Tim</button>
+    <button type="button" data-nav="laporan"><span>📊</span>Laporan</button>
+  </nav>
+
+  <div class="modal-bg hidden" id="modalBg">
+    <div class="modal" id="modalBody" role="dialog" aria-modal="true"></div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

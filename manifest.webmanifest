@@ -1,0 +1,11 @@
+{
+  "name": "SpotFlow Kucindan",
+  "short_name": "SpotFlow",
+  "description": "Parkir + valet operasional PT Kucindan Usaha Pratama",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f4eb",
+  "theme_color": "#0f766e",
+  "lang": "id",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
