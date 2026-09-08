@@ -2,22 +2,29 @@
 (function () {
   "use strict";
 
-  const KEY = "spotflow_kucindan_v1";
+  const KEY = "spotflow_kucindan_v2";
   const COMPANY = "PT Kucindan Usaha Pratama";
-  const SITE = "Kucindan Valet";
   const HOURS = "06.00–22.00";
+  const LOCS = [
+    "MOP", "Sate Maranggi", "Lyma Brisket", "Kalimalang", "Pasar Minggu",
+    "Enablerspace", "Taman Teras Tebet", "Bakmi Berdikari", "RSKM 1", "RSKM 2", "Kantor / Office"
+  ];
+  const SITE_DEFAULT = "MOP";
   const FEE = 35000;
   const TZ = "Asia/Jakarta";
 
   const STAFF = [
-    { id: "agus", name: "Agus Rahman", role: "Supervisor" },
-    { id: "doni", name: "Doni Saputra", role: "Valet" },
-    { id: "rizky", name: "Rizky Maulana", role: "Valet" },
-    { id: "tania", name: "Tania Inria Pramesta", role: "Kasir" },
-    { id: "sapta", name: "Saptahendra Septiansyah", role: "Valet" },
+    { id: "sapta-hendra", name: "Saptahendra Septiansyah", role: "Leader Valet" },
+    { id: "saifu", name: "Saifurohman", role: "Valet" },
+    { id: "sapta", name: "Sapta", role: "Valet" },
+    { id: "topan", name: "Topan", role: "Valet" },
     { id: "arfan", name: "Arfan", role: "Valet" },
-    { id: "hermansyah", name: "O Hermansyah", role: "Valet" },
-    { id: "riyo", name: "Riyo Nardo", role: "Valet" }
+    { id: "riyo", name: "Riyo Nardo", role: "Valet" },
+    { id: "dwijo", name: "Dwijo Kusdaryanto", role: "Valet" },
+    { id: "hermansyah", name: "O Hermansyah", role: "BD / lapangan" },
+    { id: "tania", name: "Tania Inria Pramesta", role: "HQ / kas & setoran" },
+    { id: "mop1", name: "Petugas Lokasi 1", role: "Placeholder — ganti daftar Septiawan" },
+    { id: "mop2", name: "Petugas Lokasi 2", role: "Placeholder — ganti daftar Septiawan" }
   ];
 
   const SLOT_DEFS = [
@@ -34,6 +41,9 @@
     { code: "V-11", type: "mobil", vip: false },
     { code: "V-12", type: "box", vip: false }
   ];
+
+  const SLA_LOBBY = 12; // mnt
+  const SLA_PANGGIL = 8; // mnt
 
   const COLS = [
     { id: "lobby", label: "Lobby", action: "Parkirkan", next: "parkir" },
@@ -98,13 +108,28 @@
   /* ---------- persistence ---------- */
   function load() {
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = localStorage.getItem(KEY) || localStorage.getItem("spotflow_kucindan_v1");
       if (raw) {
         const s = JSON.parse(raw);
-        if (s && Array.isArray(s.tickets)) return s;
+        if (s && Array.isArray(s.tickets)) return normalizeState(s);
       }
     } catch (e) {}
     return seed();
+  }
+  function normalizeState(s) {
+    if (!s.activeLokasi || !LOCS.includes(s.activeLokasi)) s.activeLokasi = SITE_DEFAULT;
+    if (!STAFF.some(x => x.id === s.activeStaffId)) s.activeStaffId = "sapta-hendra";
+    if (!Array.isArray(s.archive)) s.archive = [];
+    if (!Array.isArray(s.bookings)) s.bookings = [];
+    if (!Array.isArray(s.attendance)) s.attendance = [];
+    for (const ticket of s.tickets) {
+      if (!ticket.lokasi) ticket.lokasi = s.activeLokasi;
+      if (ticket.slaOverrideAlasan == null) ticket.slaOverrideAlasan = "";
+    }
+    return s;
+  }
+  function currentLokasi() {
+    return state.activeLokasi || SITE_DEFAULT;
   }
   function save() {
     localStorage.setItem(KEY, JSON.stringify(state));
@@ -117,39 +142,40 @@
   }
 
   function seed() {
-    const staffOn = "Agus Rahman";
+    const leader = "Saptahendra Septiansyah";
+    const loc = SITE_DEFAULT;
     const tickets = [
       {
         id: uid("T"), kode: "KC-LOBBY1", plate: "B 1288 XP", guestName: "Bapak Andi", guestPhone: "0812-1000-1111",
-        vehicleType: "mobil", fee: FEE, tip: 0, note: "Jangan geser kursi pengemudi.",
-        valetStatus: "lobby", spotId: null, staff: "Doni Saputra",
+        vehicleType: "mobil", fee: FEE, tip: 0, note: "Jangan geser kursi pengemudi.", lokasi: loc,
+        valetStatus: "lobby", spotId: null, staff: "Saifurohman", slaOverrideAlasan: "",
         checkIn: minsAgo(13), parkedAt: null, calledAt: null, readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(minsAgo(13)), events: [
-          { at: minsAgo(13), label: "Kunci diterima di lobby" }
+          { at: minsAgo(13), label: "Kunci diterima di lobby · " + loc }
         ]
       },
       {
         id: uid("T"), kode: "KC-LOBBY2", plate: "B 4401 HN", guestName: "Ibu Maya", guestPhone: "0813-2000-2222",
-        vehicleType: "mobil", fee: FEE, tip: 0, note: "",
-        valetStatus: "lobby", spotId: null, staff: "Rizky Maulana",
+        vehicleType: "mobil", fee: FEE, tip: 0, note: "", lokasi: loc,
+        valetStatus: "lobby", spotId: null, staff: "Topan", slaOverrideAlasan: "",
         checkIn: minsAgo(20), parkedAt: null, calledAt: null, readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(minsAgo(20)), events: [
-          { at: minsAgo(20), label: "Kunci diterima di lobby" }
+          { at: minsAgo(20), label: "Kunci diterima di lobby · " + loc }
         ]
       },
       {
         id: uid("T"), kode: "KC-LOBBY3", plate: "B 9012 KL", guestName: "Bapak Fajar", guestPhone: "0812-3000-3333",
-        vehicleType: "mobil", fee: 40000, tip: 0, note: "VIP klinik — ambil cepat jika dipanggil.",
-        valetStatus: "lobby", spotId: null, staff: staffOn,
+        vehicleType: "mobil", fee: 40000, tip: 0, note: "VIP — ambil cepat jika dipanggil.", lokasi: "Sate Maranggi",
+        valetStatus: "lobby", spotId: null, staff: leader, slaOverrideAlasan: "",
         checkIn: minsAgo(6), parkedAt: null, calledAt: null, readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(minsAgo(6)), events: [
-          { at: minsAgo(6), label: "Kunci diterima di lobby" }
+          { at: minsAgo(6), label: "Kunci diterima di lobby · Sate Maranggi" }
         ]
       },
       {
         id: uid("T"), kode: "KC-PARK01", plate: "B 1721 MZ", guestName: "Ibu Sari", guestPhone: "0812-4000-4444",
-        vehicleType: "mobil", fee: FEE, tip: 0, note: "Child seat belakang.",
-        valetStatus: "parkir", spotId: "V-01", staff: "Doni Saputra",
+        vehicleType: "mobil", fee: FEE, tip: 0, note: "Child seat belakang.", lokasi: loc,
+        valetStatus: "parkir", spotId: "V-01", staff: "Saifurohman", slaOverrideAlasan: "",
         checkIn: hoursAgo(1.2), parkedAt: hoursAgo(1.0), calledAt: null, readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(1.2)), events: [
           { at: hoursAgo(1.2), label: "Kunci diterima di lobby" },
@@ -158,18 +184,18 @@
       },
       {
         id: uid("T"), kode: "KC-PARK02", plate: "B 5510 QR", guestName: "Bapak Yoga", guestPhone: "0812-5000-5555",
-        vehicleType: "mobil", fee: FEE, tip: 5000, note: "",
-        valetStatus: "parkir", spotId: "V-03", staff: "Rizky Maulana",
+        vehicleType: "mobil", fee: FEE, tip: 5000, note: "", lokasi: "Lyma Brisket",
+        valetStatus: "parkir", spotId: "V-03", staff: "Sapta", slaOverrideAlasan: "",
         checkIn: hoursAgo(2.1), parkedAt: hoursAgo(2.0), calledAt: null, readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(2.1)), events: [
-          { at: hoursAgo(2.1), label: "Kunci diterima di lobby" },
+          { at: hoursAgo(2.1), label: "Kunci diterima di lobby · Lyma Brisket" },
           { at: hoursAgo(2.0), label: "Diparkir di V-03" }
         ]
       },
       {
         id: uid("T"), kode: "KC-PARK03", plate: "B 3344 TT", guestName: "Ibu Lina", guestPhone: "0812-6000-6666",
-        vehicleType: "mobil", fee: FEE, tip: 0, note: "VIP klinik — ambil cepat jika dipanggil.",
-        valetStatus: "parkir", spotId: "V-05", staff: "Arfan",
+        vehicleType: "mobil", fee: FEE, tip: 0, note: "VIP — ambil cepat jika dipanggil.", lokasi: loc,
+        valetStatus: "parkir", spotId: "V-05", staff: "Arfan", slaOverrideAlasan: "",
         checkIn: hoursAgo(0.8), parkedAt: hoursAgo(0.7), calledAt: null, readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(0.8)), events: [
           { at: hoursAgo(0.8), label: "Kunci diterima di lobby" },
@@ -178,8 +204,8 @@
       },
       {
         id: uid("T"), kode: "KC-PARK04", plate: "B 7788 UV", guestName: "Bapak Reza", guestPhone: "0812-7000-7777",
-        vehicleType: "box", fee: 45000, tip: 0, note: "",
-        valetStatus: "parkir", spotId: "V-09", staff: "Saptahendra Septiansyah",
+        vehicleType: "box", fee: 45000, tip: 0, note: "", lokasi: loc,
+        valetStatus: "parkir", spotId: "V-09", staff: leader, slaOverrideAlasan: "",
         checkIn: hoursAgo(1.5), parkedAt: hoursAgo(1.4), calledAt: null, readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(1.5)), events: [
           { at: hoursAgo(1.5), label: "Kunci diterima di lobby" },
@@ -188,8 +214,8 @@
       },
       {
         id: uid("T"), kode: "KC-CALL01", plate: "B 1330 SAK", guestName: "Bapak Hendra", guestPhone: "0812-8000-8888",
-        vehicleType: "mobil", fee: FEE, tip: 0, note: "Child seat belakang.",
-        valetStatus: "dipanggil", spotId: "V-02", staff: "Doni Saputra",
+        vehicleType: "mobil", fee: FEE, tip: 0, note: "Child seat belakang.", lokasi: loc,
+        valetStatus: "dipanggil", spotId: "V-02", staff: "Saifurohman", slaOverrideAlasan: "",
         checkIn: hoursAgo(1.6), parkedAt: hoursAgo(1.5), calledAt: minsAgo(11), readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(1.6)), events: [
           { at: hoursAgo(1.6), label: "Kunci diterima di lobby" },
@@ -199,19 +225,19 @@
       },
       {
         id: uid("T"), kode: "KC-CALL02", plate: "B 2201 WW", guestName: "Ibu Nina", guestPhone: "0812-9000-9999",
-        vehicleType: "mobil", fee: FEE, tip: 10000, note: "",
-        valetStatus: "dipanggil", spotId: "V-07", staff: "Rizky Maulana",
+        vehicleType: "mobil", fee: FEE, tip: 10000, note: "", lokasi: "Kalimalang",
+        valetStatus: "dipanggil", spotId: "V-07", staff: "Riyo Nardo", slaOverrideAlasan: "",
         checkIn: hoursAgo(0.9), parkedAt: hoursAgo(0.8), calledAt: minsAgo(4), readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(0.9)), events: [
-          { at: hoursAgo(0.9), label: "Kunci diterima di lobby" },
+          { at: hoursAgo(0.9), label: "Kunci diterima di lobby · Kalimalang" },
           { at: hoursAgo(0.8), label: "Diparkir di V-07" },
           { at: minsAgo(4), label: "Dipanggil — petugas menuju slot" }
         ]
       },
       {
         id: uid("T"), kode: "KC-READY1", plate: "B 6600 XY", guestName: "Bapak Dimas", guestPhone: "0813-1111-0001",
-        vehicleType: "mobil", fee: FEE, tip: 0, note: "",
-        valetStatus: "siap", spotId: "V-04", staff: staffOn,
+        vehicleType: "mobil", fee: FEE, tip: 0, note: "", lokasi: loc,
+        valetStatus: "siap", spotId: "V-04", staff: leader, slaOverrideAlasan: "",
         checkIn: hoursAgo(1.25), parkedAt: hoursAgo(1.15), calledAt: minsAgo(18), readyAt: minsAgo(8), checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(1.25)), events: [
           { at: hoursAgo(1.25), label: "Kunci diterima di lobby" },
@@ -222,11 +248,11 @@
       },
       {
         id: uid("T"), kode: "KC-READY2", plate: "B 1199 ZZ", guestName: "Ibu Rina Hartono", guestPhone: "0813-2222-0002",
-        vehicleType: "mobil", fee: FEE, tip: 5000, note: "Drop lobby utara.",
-        valetStatus: "siap", spotId: "V-08", staff: "Doni Saputra",
+        vehicleType: "mobil", fee: FEE, tip: 5000, note: "Drop lobby utara.", lokasi: "Pasar Minggu",
+        valetStatus: "siap", spotId: "V-08", staff: "Dwijo Kusdaryanto", slaOverrideAlasan: "",
         checkIn: hoursAgo(2.5), parkedAt: hoursAgo(2.4), calledAt: minsAgo(25), readyAt: minsAgo(12), checkOut: null,
         payment: null, shift: shiftOf(hoursAgo(2.5)), events: [
-          { at: hoursAgo(2.5), label: "Kunci diterima di lobby" },
+          { at: hoursAgo(2.5), label: "Kunci diterima di lobby · Pasar Minggu" },
           { at: hoursAgo(2.4), label: "Diparkir di V-08" },
           { at: minsAgo(25), label: "Dipanggil" },
           { at: minsAgo(12), label: "Siap di lobby" }
@@ -234,8 +260,8 @@
       }
     ];
 
-    // historical selesai for laporan / jasa bulan
     const hist = [];
+    const histLocs = ["MOP", "Sate Maranggi", "Lyma Brisket", "Kalimalang", "Pasar Minggu"];
     for (let i = 0; i < 18; i++) {
       const agoH = 8 + i * 7;
       const checkIn = hoursAgo(agoH + 1.5);
@@ -246,8 +272,10 @@
         guestName: "Tamu " + (i + 1), guestPhone: "",
         vehicleType: i % 5 === 0 ? "box" : "mobil",
         fee: i % 5 === 0 ? 45000 : FEE, tip: i % 3 === 0 ? 5000 : 0, note: "",
+        lokasi: histLocs[i % histLocs.length],
         valetStatus: "selesai", spotId: "V-0" + ((i % 8) + 1),
-        staff: STAFF[i % STAFF.length].name,
+        staff: STAFF[i % Math.min(7, STAFF.length)].name,
+        slaOverrideAlasan: "",
         checkIn, parkedAt: hoursAgo(agoH + 1.3), calledAt: hoursAgo(agoH + 0.2), readyAt: hoursAgo(agoH + 0.1), checkOut,
         payment: ["tunai", "qris", "kartu"][i % 3],
         shift: shiftOf(checkIn),
@@ -256,21 +284,23 @@
     }
 
     return {
-      activeStaffId: "agus",
+      activeStaffId: "sapta-hendra",
+      activeLokasi: SITE_DEFAULT,
+      archive: [],
       tickets: tickets.concat(hist),
       bookings: [
         {
           id: uid("B"), plate: "B 2210 RX", guestName: "Ibu Rina Hartono", guestPhone: "0813-2222-0002",
-          eta: hoursAgo(-0.5), note: "Drop lobby utara, rapat Lt. 18", status: "menunggu"
+          eta: hoursAgo(-0.5), note: "Drop lobby utara · MOP", status: "menunggu", lokasi: "MOP"
         },
         {
           id: uid("B"), plate: "B 8871 PT", guestName: "Bapak Yoga", guestPhone: "0812-5000-5555",
-          eta: hoursAgo(0.2), note: "Sudah konfirmasi", status: "diterima"
+          eta: hoursAgo(0.2), note: "Sudah konfirmasi · Lyma", status: "diterima", lokasi: "Lyma Brisket"
         }
       ],
       attendance: [
-        { id: "at-doni", name: "Doni Saputra", clockIn: minsAgo(120), clockOut: null, lokasi: "Lobby " + SITE },
-        { id: "at-rizky", name: "Rizky Maulana", clockIn: hoursAgo(8), clockOut: hoursAgo(1), lokasi: "Lobby " + SITE }
+        { id: "at-saifu", name: "Saifurohman", clockIn: minsAgo(120), clockOut: null, lokasi: "Lobby MOP" },
+        { id: "at-topan", name: "Topan", clockIn: hoursAgo(8), clockOut: hoursAgo(1), lokasi: "Lobby MOP" }
       ]
     };
   }
@@ -296,17 +326,22 @@
     return SLOT_DEFS.filter(s => !used.has(s.code) && (!vehicleType || s.type === vehicleType || (vehicleType === "mobil" && s.type === "mobil")));
   }
 
+  function ticketSlaBreach(t) {
+    if (t.valetStatus === "lobby") {
+      const m = minsBetween(t.checkIn);
+      if (m > SLA_LOBBY) return { kind: "lobby", mins: m, text: t.plate + " masih di lobby " + m + " mnt (SLA " + SLA_LOBBY + ")" };
+    }
+    if (t.valetStatus === "dipanggil" && t.calledAt) {
+      const m = minsBetween(t.calledAt);
+      if (m > SLA_PANGGIL) return { kind: "dipanggil", mins: m, text: t.plate + " dipanggil " + m + " mnt (SLA " + SLA_PANGGIL + ")" };
+    }
+    return null;
+  }
   function anomalies() {
     const list = [];
     for (const t of activeTickets()) {
-      if (t.valetStatus === "lobby") {
-        const m = minsBetween(t.checkIn);
-        if (m > 12) list.push({ tone: "warn", text: t.plate + " masih di lobby " + m + " mnt" });
-      }
-      if (t.valetStatus === "dipanggil" && t.calledAt) {
-        const m = minsBetween(t.calledAt);
-        if (m > 8) list.push({ tone: "danger", text: t.plate + " dipanggil " + m + " mnt (SLA 8)" });
-      }
+      const b = ticketSlaBreach(t);
+      if (b) list.push({ id: t.id, tone: b.kind === "dipanggil" ? "danger" : "warn", text: b.text });
     }
     return list;
   }
@@ -343,11 +378,22 @@
     return state.tickets.find(t => t.id === id);
   }
 
-  function advanceTicket(id) {
+  function advanceTicket(id, overrideAlasan) {
     const t = findTicket(id);
     if (!t) return;
     const col = COLS.find(c => c.id === t.valetStatus);
     if (!col) return;
+    const breach = ticketSlaBreach(t);
+    const alreadyAck = breach && t._slaAckStatus === t.valetStatus;
+    if (breach && !overrideAlasan && !alreadyAck) {
+      openSlaOverrideModal(t, breach);
+      return;
+    }
+    if (breach && overrideAlasan) {
+      t.slaOverrideAlasan = (t.slaOverrideAlasan ? t.slaOverrideAlasan + " | " : "") + overrideAlasan;
+      t._slaAckStatus = t.valetStatus;
+      t.events.push({ at: iso(), label: "SLA override: " + overrideAlasan });
+    }
     if (col.next === "parkir") {
       openParkModal(t);
       return;
@@ -369,6 +415,27 @@
     save();
     toast(t.plate + " → " + (COLS.find(c => c.id === t.valetStatus)?.label || t.valetStatus));
     render();
+  }
+
+  function openSlaOverrideModal(t, breach) {
+    showModal(`
+      <h3>Override SLA</h3>
+      <p style="color:var(--bad);font-weight:700;font-size:14px;margin:0 0 8px">${esc(breach.text)}</p>
+      <p style="font-size:13px;color:var(--mut);margin:0 0 10px">Isi alasan wajib sebelum lanjut (audit Tim IT / Tania).</p>
+      <label>Alasan override</label>
+      <textarea id="slaReason" rows="3" placeholder="Contoh: tamu masih meeting · petugas antar VIP · slot penuh"></textarea>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn btn-block" type="button" id="slaCancel">Batal</button>
+        <button class="btn btn-primary btn-block" type="button" id="slaOk">Lanjut dengan alasan</button>
+      </div>
+    `);
+    document.getElementById("slaCancel").onclick = hideModal;
+    document.getElementById("slaOk").onclick = () => {
+      const reason = (document.getElementById("slaReason").value || "").trim();
+      if (reason.length < 5) { toast("Alasan minimal 5 karakter"); return; }
+      hideModal();
+      advanceTicket(t.id, reason);
+    };
   }
 
   function openParkModal(t) {
@@ -475,11 +542,13 @@
         vehicleType: document.getElementById("nkType").value,
         fee: Number(document.getElementById("nkFee").value) || FEE,
         tip: 0, note: document.getElementById("nkNote").value.trim(),
+        lokasi: currentLokasi(),
         valetStatus: "lobby", spotId: null,
         staff: document.getElementById("nkStaff").value,
+        slaOverrideAlasan: "",
         checkIn: ts, parkedAt: null, calledAt: null, readyAt: null, checkOut: null,
         payment: null, shift: shiftOf(ts),
-        events: [{ at: ts, label: "Kunci diterima di lobby" }]
+        events: [{ at: ts, label: "Kunci diterima di lobby · " + currentLokasi() }]
       };
       state.tickets.unshift(t);
       save();
@@ -491,10 +560,25 @@
   }
 
   function resetDemo() {
-    if (!confirm("Reset semua data ke demo seed?")) return;
-    state = seed();
+    if (!confirm("Arsipkan data aktif & muat ulang demo? Data lama tidak dihapus (soft-archive).")) return;
+    const snap = {
+      at: iso(),
+      activeLokasi: state.activeLokasi,
+      activeStaffId: state.activeStaffId,
+      tickets: state.tickets,
+      bookings: state.bookings,
+      attendance: state.attendance
+    };
+    const archive = Array.isArray(state.archive) ? state.archive.slice() : [];
+    archive.unshift(snap);
+    // keep last 10 archives
+    while (archive.length > 10) archive.pop();
+    const fresh = seed();
+    fresh.archive = archive;
+    fresh.activeLokasi = state.activeLokasi || SITE_DEFAULT;
+    state = fresh;
     save();
-    toast("Data demo direset");
+    toast("Demo dimuat · " + archive.length + " arsip tersimpan");
     render();
   }
 
@@ -525,8 +609,10 @@
   function renderTopbar() {
     const st = activeStaff();
     document.getElementById("topDate").textContent = fmtDate();
-    document.getElementById("topShift").textContent = shiftLabel(shiftOf()) + " · " + st.name;
+    document.getElementById("topShift").textContent = currentLokasi() + " · " + shiftLabel(shiftOf()) + " · " + st.name;
     document.getElementById("topClock").textContent = fmtTime() + " WIB";
+    const locSel = document.getElementById("locSelect");
+    if (locSel && locSel.value !== currentLokasi()) locSel.value = currentLokasi();
   }
 
   function ticketCard(t) {
@@ -539,7 +625,7 @@
 
     return `<article class="ticket" data-id="${t.id}">
       <div class="plate">${esc(t.plate)}</div>
-      <div class="price">${rp(t.fee)}${t.spotId ? " · " + esc(t.spotId) : ""}</div>
+      <div class="price">${rp(t.fee)}${t.spotId ? " · " + esc(t.spotId) : ""} · <span class="pill teal">${esc(t.lokasi || currentLokasi())}</span></div>
       <div class="meta">${esc(t.guestName)}${t.guestPhone ? " · " + esc(t.guestPhone) : ""}<br/>${meta}</div>
       ${t.note ? `<div class="note">${esc(t.note)}</div>` : ""}
       <div class="actions">
@@ -577,8 +663,8 @@
     }
     html += `<div class="kpis">
       <div class="kpi"><div class="label">Valet aktif</div><div class="n">${act.length}</div><div class="sub">Kunci masih di pos.</div></div>
-      <div class="kpi"><div class="label">Jasa hari ini</div><div class="n">${rpShort(jasaToday)}</div><div class="sub">${todayDone.length} tiket selesai.</div></div>
-      <div class="kpi"><div class="label">Tip petugas</div><div class="n">${rpShort(tipToday)}</div><div class="sub">Tidak masuk kas perusahaan.</div></div>
+      <div class="kpi"><div class="label">Kas (jasa) hari ini</div><div class="n">${rpShort(jasaToday)}</div><div class="sub">${todayDone.length} tiket · masuk kas perusahaan</div></div>
+      <div class="kpi"><div class="label">Tip petugas</div><div class="n">${rpShort(tipToday)}</div><div class="sub">Terpisah dari kas / setoran.</div></div>
       <div class="kpi"><div class="label">Jasa bulan ini</div><div class="n">${rpShort(jasaMonth)}</div><div class="sub">${monthDone.length} tiket.</div></div>
     </div>
     <div class="kanban">`;
@@ -607,7 +693,7 @@
       <div class="page-head"><div>
         <p class="eyebrow">HP petugas</p>
         <h1>Pilih pegawai</h1>
-        <p>Petugas aktif dipakai untuk shift, Terima kunci, dan laporan.</p>
+        <p>Roster sementara (tim Septiawan / Saptahendra). Placeholder diganti setelah daftar resmi.</p>
       </div></div>
       <div class="staff-grid">
         ${STAFF.map(s => `
@@ -642,7 +728,7 @@
       <div class="page-head"><div>
         <p class="eyebrow">Denah</p>
         <h1>Peta slot</h1>
-        <p>${Object.keys(used).length}/${SLOT_DEFS.length} terisi · ${SITE}</p>
+        <p>${Object.keys(used).length}/${SLOT_DEFS.length} terisi · ${esc(currentLokasi())}</p>
       </div></div>
       <div class="slots">
         ${SLOT_DEFS.map(s => {
@@ -733,9 +819,11 @@
         state.tickets.unshift({
           id: uid("T"), kode: trackCode(), plate: b.plate, guestName: b.guestName, guestPhone: b.guestPhone,
           vehicleType: "mobil", fee: FEE, tip: 0, note: b.note || "",
+          lokasi: b.lokasi || currentLokasi(),
           valetStatus: "lobby", spotId: null, staff: activeStaff().name,
+          slaOverrideAlasan: "",
           checkIn: ts, parkedAt: null, calledAt: null, readyAt: null, checkOut: null,
-          payment: null, shift: shiftOf(ts), events: [{ at: ts, label: "Booking diterima di lobby" }]
+          payment: null, shift: shiftOf(ts), events: [{ at: ts, label: "Booking diterima di lobby · " + (b.lokasi || currentLokasi()) }]
         });
         save();
         toast(b.plate + " masuk Lobby");
@@ -780,10 +868,10 @@
         <div>
           <p class="eyebrow">${esc(COMPANY)}</p>
           <h1>Laporan valet</h1>
-          <p>${SITE} · filter & ekspor CSV / cetak</p>
+          <p>${esc(currentLokasi())} · multi-lokasi · filter & ekspor CSV / cetak</p>
         </div>
         <div class="btn-row">
-          <button class="btn" type="button" id="btnCsv">CSV</button>
+          <button class="btn" type="button" id="btnCsv">CSV setoran</button>
           <button class="btn" type="button" id="btnPrint">Cetak</button>
         </div>
       </div>
@@ -794,8 +882,8 @@
       </div>
       <div class="kpis">
         <div class="kpi"><div class="label">Tiket selesai</div><div class="n">${list.length}</div><div class="sub">Periode terpilih</div></div>
-        <div class="kpi"><div class="label">Jasa valet</div><div class="n">${rpShort(jasa)}</div><div class="sub">${rp(jasa)}</div></div>
-        <div class="kpi"><div class="label">Tip petugas</div><div class="n">${rpShort(tip)}</div><div class="sub">${rp(tip)}</div></div>
+        <div class="kpi"><div class="label">Kas (jasa_kas)</div><div class="n">${rpShort(jasa)}</div><div class="sub">${rp(jasa)} · masuk setoran</div></div>
+        <div class="kpi"><div class="label">Tip (bukan kas)</div><div class="n">${rpShort(tip)}</div><div class="sub">${rp(tip)} · tidak disetor sebagai jasa</div></div>
         <div class="kpi"><div class="label">Rata-rata durasi</div><div class="n">${avg} <span style="font-size:14px">mnt</span></div><div class="sub">Check-in → selesai</div></div>
       </div>
       <div class="card">
@@ -826,18 +914,40 @@
   }
 
   function downloadCsv(list, period) {
-    const rows = [["kode","plate","guest","staff","fee","tip","payment","shift","checkIn","checkOut","vehicle"]];
+    // Kolom selaras Excel setoran / Apps Script Transaksi
+    const rows = [["timestamp","lokasi","event","id","plat","status","tamu","wa","slot","jenis","metode_bayar","jasa_kas","tip","total","petugas","shift","catatan","sla_override_alasan"]];
     for (const t of list) {
-      rows.push([t.kode, t.plate, t.guestName, t.staff, t.fee, t.tip || 0, t.payment || "", t.shift, t.checkIn, t.checkOut, t.vehicleType]);
+      const jasa = Number(t.fee || 0);
+      const tip = Number(t.tip || 0);
+      rows.push([
+        t.checkOut || t.readyAt || t.checkIn || "",
+        t.lokasi || currentLokasi(),
+        "serahkan_bayar",
+        t.id || t.kode || "",
+        t.plate || "",
+        "selesai",
+        t.guestName || "",
+        t.guestPhone || "",
+        t.spotId || "",
+        t.vehicleType || "",
+        t.payment || "",
+        jasa,
+        tip,
+        jasa + tip,
+        t.staff || "",
+        t.shift || "",
+        t.note || "",
+        t.slaOverrideAlasan || ""
+      ]);
     }
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "spotflow-kucindan-" + period + ".csv";
+    a.download = "setoran-spotflow-kucindan-" + period + "-" + todayKey() + ".csv";
     a.click();
     URL.revokeObjectURL(a.href);
-    toast("CSV diunduh");
+    toast("CSV setoran diunduh (jasa_kas ≠ tip)");
   }
 
   function renderBooking() {
@@ -948,6 +1058,17 @@
     });
     document.getElementById("btnReset").onclick = resetDemo;
     document.getElementById("btnResetMobile") && (document.getElementById("btnResetMobile").onclick = resetDemo);
+    const locSel = document.getElementById("locSelect");
+    if (locSel) {
+      locSel.innerHTML = LOCS.map(l => `<option value="${l}">${l}</option>`).join("");
+      locSel.value = currentLokasi();
+      locSel.onchange = () => {
+        state.activeLokasi = locSel.value;
+        save();
+        toast("Lokasi: " + locSel.value);
+        render();
+      };
+    }
     document.getElementById("menuToggle").onclick = () => {
       document.getElementById("sidebar").classList.toggle("open");
     };

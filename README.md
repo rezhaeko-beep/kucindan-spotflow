@@ -1,28 +1,34 @@
 # SpotFlow Kucindan
 
-Parkir + valet operasional untuk **PT Kucindan Usaha Pratama**.
+Parkir + valet operasional **PT Kucindan Usaha Pratama**.
 
-Vanilla HTML/CSS/JS (hash routes), mobile-first, data demo di `localStorage`.
+Live: https://rezhaeko-beep.github.io/kucindan-spotflow/
+
+Vanilla HTML/CSS/JS · hash routes · `localStorage` cache · multi-lokasi.
 
 ## Halaman
 
 | Route | Fitur |
 |-------|--------|
 | `#/operasi` | Kanban Lobby → Di parkir → Dipanggil → Siap |
-| `#/pegawai` | Pilih petugas aktif + absensi demo |
-| `#/slot` | Peta 12 slot (V-01…V-12) |
-| `#/tim` | Owner: anomali, booking, performa, saran shift |
-| `#/laporan` | KPI, filter hari/7hari/bulan, CSV & cetak |
-| `#/booking` | Form booking tamu |
-| `#/lacak?kode=` | Timeline status kendaraan |
+| `#/pegawai` | Roster Septiawan/Saptahendra (+ placeholder) |
+| `#/slot` | Peta V-01…V-12 |
+| `#/tim` | Anomali SLA, booking, performa, saran shift |
+| `#/laporan` | KPI kas vs tip · CSV setoran · cetak |
+| `#/booking` | Form tamu |
+| `#/lacak?kode=` | Timeline |
 
-## Demo cepat
+## Tim IT notes
 
-1. Buka Operasi — lihat kanban seed.
-2. Klik **Parkirkan** / **Panggil** / **Siap** / **Serahkan & bayar**.
-3. Coba **Terima kunci**, Slot, Tim, Laporan (CSV).
-4. **Reset data demo** di sidebar jika perlu.
+- **Lokasi:** MOP / Sate Maranggi / Lyma Brisket / Kalimalang / Pasar Minggu / …
+- **Tip ≠ kas:** `jasa_kas` masuk setoran; `tip` terpisah
+- **SLA:** lobby 12 mnt · panggil 8 mnt — override wajib alasan
+- **Reset:** soft-archive (bukan wipe)
+- **Sheet sync:** `docs/SHEET-SYNC.md` + `apps-script/Code.gs`
 
-## Deploy
+## Demo
 
-GitHub Pages dari branch `main`, folder `/` (root).
+1. Pilih lokasi di topbar → Operasi kanban.
+2. Alur Parkirkan / Panggil / Siap / Serahkan & bayar (isi alasan jika SLA lewat).
+3. Laporan → **CSV setoran** (kolom Excel ops).
+4. **Arsip & muat demo** di sidebar jika perlu.

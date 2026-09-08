@@ -31,9 +31,10 @@
       <button class="nav-btn" type="button" data-nav="booking"><span class="ico">📝</span> Booking</button>
       <button class="nav-btn" type="button" data-nav="lacak"><span class="ico">🔎</span> Lacak</button>
       <div class="side-foot">
-        <button type="button" id="btnReset">Reset data demo</button>
+        <button type="button" id="btnReset">Arsip & muat demo</button>
         <div><b>PT Kucindan Usaha Pratama</b></div>
-        <div>Kucindan Valet · 06.00–22.00</div>
+        <div>Multi-lokasi · Valet 06.00–22.00</div>
+        <div style="margin-top:6px;font-size:11px">Sheet sync: docs/SHEET-SYNC.md</div>
       </div>
     </aside>
 
@@ -41,6 +42,8 @@
       <header class="topbar">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <button class="menu-toggle" type="button" id="menuToggle" aria-label="Menu">☰ Menu</button>
+          <label class="muted" style="margin:0;font-size:11px" for="locSelect">Lokasi</label>
+          <select id="locSelect" style="width:auto;min-width:140px;padding:6px 10px;font-size:13px;border-radius:10px"></select>
           <span id="topDate">—</span>
           <span>·</span>
           <span id="topShift">—</span>
