@@ -748,13 +748,13 @@
   function openSettings() {
     showModal(`
       <h3>Pengaturan Sheets</h3>
-      <p style="font-size:13px;color:var(--mut);margin:0 0 10px">Sync opsional ke Google Sheets (lihat docs/SHEET-SYNC.md). Isi Web App URL + token Apps Script di perangkat ini.</p>
+      <p style="font-size:13px;color:var(--mut);margin:0 0 10px">Sync opsional ke Google Sheets (pola SpotFlow MOP). Field: token <code>spotflow-mop-2026</code>, sheet <code>1M3bBUqGgzP5VqTBz6Ujoy6n948RJIPAHKv874IWdj50</code> — isi manual (tidak di-hardcode ke Pages). Lihat docs/SHEET-SYNC.md.</p>
       <label>Web App URL</label>
       <input id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(cfg.url || "")}" />
       <label>Token rahasia</label>
-      <input id="cfgToken" placeholder="SECRET_TOKEN" value="${esc(cfg.token || DEFAULT_TOKEN)}" />
+      <input id="cfgToken" placeholder="spotflow-mop-2026" value="${esc(cfg.token || "")}" />
       <label>Spreadsheet ID</label>
-      <input id="cfgSheetId" value="${esc(cfg.sheetId || DEFAULT_SHEET_ID)}" />
+      <input id="cfgSheetId" placeholder="1M3bBUqGgzP5VqTBz6Ujoy6n948RJIPAHKv874IWdj50" value="${esc(cfg.sheetId || "")}" />
       <p id="cfgStatus" style="font-size:12px;color:var(--mut);margin:8px 0">Antrian gagal: ${queue.length}${cfg.url ? " · URL tersimpan" : " · belum URL"}</p>
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
         <button class="btn" type="button" id="btnTestSync">Tes koneksi</button>
