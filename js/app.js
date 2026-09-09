@@ -1593,7 +1593,7 @@
   }
 
 
-  /* ---------- HO Kantor (mounts #ho-kpi-root / #ho-input-root) ---------- */
+  /* ---------- HO Kantor (mounts #ho-kpi-root / #ho-anomaly-root / #ho-input-root) ---------- */
   function buildHoApi() {
     return {
       LOCS: LOCS, STAFF: STAFF, FEE: FEE, TZ: TZ,
@@ -1685,9 +1685,11 @@
       '<button class="btn" type="button" id="hoBtnOperasi">Ke Operasi</button>' +
       '</div></div>' +
       '<div id="ho-kpi-root"></div>' +
+      '<div id="ho-anomaly-root"></div>' +
       '<div id="ho-input-root"></div>' +
       '</div>';
     var kpiRoot = document.getElementById("ho-kpi-root");
+    var anomalyRoot = document.getElementById("ho-anomaly-root");
     var inputRoot = document.getElementById("ho-input-root");
     var api = buildHoApi();
     if (window.SpotFlowHoKpi && typeof window.SpotFlowHoKpi.mount === "function") {
@@ -1696,6 +1698,11 @@
       window.SpotFlowHoKpi.render(kpiRoot);
     } else {
       renderHoKpiPlaceholder(kpiRoot);
+    }
+    if (window.SpotFlowHoAnomaly && typeof window.SpotFlowHoAnomaly.mount === "function") {
+      window.SpotFlowHoAnomaly.mount(anomalyRoot);
+    } else if (anomalyRoot) {
+      anomalyRoot.innerHTML = '<div class="ho-empty">Modul anomali menyusul (js/ho-anomaly.js).</div>';
     }
     if (window.SpotFlowHoInput && typeof window.SpotFlowHoInput.render === "function") {
       window.SpotFlowHoInput.render(inputRoot, api);
