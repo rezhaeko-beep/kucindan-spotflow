@@ -1,0 +1,13 @@
+.ho-spot-control { display:flex; flex-direction:column; gap:12px; }
+.ho-spot-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.ho-spot-card { border:1px solid var(--line,#d6d0c8); border-radius:14px; padding:12px; background:#fff; border-left:4px solid #94a3b8; }
+.ho-spot-card.band-P0 { border-left-color:#dc2626; background:#fffbfb; }
+.ho-spot-card.band-P1 { border-left-color:#d97706; background:#fffdf8; }
+.ho-spot-card.band-OK { border-left-color:#16a34a; }
+.ho-spot-card h3 { margin:0 0 4px; font-size:15px; }
+.ho-spot-card .pill { font-size:11px; font-weight:800; }
+.ho-spot-card label { display:block; margin:8px 0 4px; font-size:11px; color:#5B6570; }
+.ho-spot-card select, .ho-spot-report input, .ho-spot-report select { width:100%; padding:8px; border-radius:8px; border:1px solid #d6d0c8; }
+.ho-spot-report { padding-top:8px; }
+.ho-spot-report h3 { margin:12px 0 6px; font-size:15px; }
+@media (max-width:800px){ .ho-spot-grid { grid-template-columns:1fr; } }
