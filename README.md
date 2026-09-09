@@ -23,7 +23,7 @@ Demo: sidebar **Arsip** → **🧪 Muat demo** (eksplisit saja).
 | `#/slot` | Peta V-01…V-12 |
 | `#/tim` | Anomali SLA, booking, shift, performa |
 | `#/laporan` | KPI kas vs tip · CSV setoran · cetak |
-| `#/ho` | Kantor HO · input cepat setoran/absensi/tiket (Valet + Parkir gate) · KPI |
+| `#/ho` | Kantor HO · KPI · anomali · input cepat (Valet + Parkir gate) — tutorial: `docs/HO-TUTORIAL.md` |
 | `#/booking` | Form tamu |
 | `#/lacak?kode=` | Timeline |
 
