@@ -63,6 +63,8 @@ var HEADERS_TRANSAKSI = [
   'slot', 'jenis', 'metode_bayar', 'jasa_kas', 'tip', 'total', 'petugas',
   'shift', 'catatan', 'sla_override_alasan'
 ];
+// Folder 04 template aliases (CSV/export): Omzet=jasa_kas, Tip=tip,
+// Setor_Tunai/Setor_Nontunai = jasa_kas split by metode_bayar (tip never in Setor).
 var HEADERS_ABSENSI = [
   'timestamp', 'lokasi', 'event', 'petugas', 'status_dinas', 'catatan'
 ];
@@ -196,8 +198,8 @@ function doPost(e) {
         row.slot || '',
         row.jenis || '',
         row.metode_bayar || row.metode || '',
-        row.jasa_kas != null ? row.jasa_kas : (row.fee || 0),
-        row.tip != null ? row.tip : 0,
+        row.jasa_kas != null ? row.jasa_kas : (row.Omzet != null ? row.Omzet : (row.omzet != null ? row.omzet : (row.fee || 0))),
+        row.tip != null ? row.tip : (row.Tip != null ? row.Tip : 0),
         row.total != null ? row.total : ((Number(row.jasa_kas || row.fee || 0)) + (Number(row.tip || 0))),
         row.petugas || '',
         row.shift || '',

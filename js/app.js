@@ -1419,11 +1419,14 @@
   }
 
   function downloadCsv(list, period) {
-    // Kolom selaras Excel setoran / Apps Script Transaksi
-    const rows = [["timestamp","lokasi","event","id","plat","status","tamu","wa","slot","jenis","metode_bayar","jasa_kas","tip","total","petugas","shift","catatan","sla_override_alasan"]];
+    // Kolom SpotFlow + alias Folder 04 (Omzet/Setor Tunai+Nontunai; tip terpisah)
+    const rows = [["timestamp","lokasi","event","id","plat","status","tamu","wa","slot","jenis","metode_bayar","jasa_kas","tip","total","Omzet","Tip","Setor_Tunai","Setor_Nontunai","petugas","shift","catatan","sla_override_alasan"]];
     for (const t of list) {
       const jasa = Number(t.fee || 0);
       const tip = Number(t.tip || 0);
+      const pay = String(t.payment || "").toLowerCase();
+      const tunai = /tunai|cash/.test(pay) ? jasa : 0;
+      const nontunai = jasa - tunai;
       rows.push([
         t.checkOut || t.readyAt || t.checkIn || "",
         t.lokasi || currentLokasi(),
@@ -1439,6 +1442,10 @@
         jasa,
         tip,
         jasa + tip,
+        jasa,
+        tip,
+        tunai,
+        nontunai,
         t.staff || "",
         t.shift || "",
         t.note || "",
@@ -1452,7 +1459,7 @@
     a.download = "setoran-spotflow-kucindan-" + period + "-" + todayKey() + ".csv";
     a.click();
     URL.revokeObjectURL(a.href);
-    toast("CSV setoran diunduh (jasa_kas ≠ tip)");
+    toast("CSV setoran diunduh (Omzet=jasa_kas · Tip terpisah · Setor≠tip)");
     syncEvent("export_setoran", {
       periode: period,
       kendaraan: list.length,

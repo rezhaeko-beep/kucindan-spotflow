@@ -65,3 +65,18 @@ Client: tombol **Ambil dari Sheet** + auto-hydrate on boot jika `url` terisi. Ha
 ## PWA
 
 `sw.js` meng-cache shell (HTML/CSS/JS/icon). **Tidak** meng-cache `script.google.com`.
+
+## Map ke template setoran Folder 04
+
+Template Drive folder 04 memakai **Omzet / Setor Tunai / Setor Nontunai** (parkir+valet) — **tanpa** kolom `jasa_kas` / tip terpisah di template lama.
+
+| SpotFlow | Folder 04 | Catatan |
+|----------|-----------|---------|
+| `jasa_kas` | **Omzet** (dan masuk Setor) | Kas perusahaan |
+| `tip` | **Tip** (kolom ekstra CSV) | **Tidak** masuk Omzet/Setor |
+| `jasa_kas` + metode tunai | **Setor_Tunai** | Split dari metode_bayar |
+| `jasa_kas` + non-tunai | **Setor_Nontunai** | QR/transfer/etc. |
+| `total` | — | jasa_kas + tip (referensi tagihan tamu saja) |
+
+CSV export app sudah mengeluarkan kedua set kolom. Apps Script menerima alias `Omzet`/`omzet` → `jasa_kas` dan `Tip` → `tip`.
+
