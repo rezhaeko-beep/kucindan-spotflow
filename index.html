@@ -16,6 +16,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
   <link rel="stylesheet" href="css/ho.css" />
+  <link rel="stylesheet" href="css/ho-spot-control.css" />
 </head>
 <body>
   <div class="layout">
@@ -35,36 +36,28 @@
       <button class="nav-btn" type="button" data-nav="ho"><span class="ico">🏢</span> Kantor</button>
       <button class="nav-btn" type="button" data-nav="booking"><span class="ico">📝</span> Booking</button>
       <button class="nav-btn" type="button" data-nav="lacak"><span class="ico">🔎</span> Lacak</button>
-      <a class="nav-ref" href="https://quartz-harbor-fair-king.grok.me/" target="_blank" rel="noopener noreferrer" title="Rival digital valet demo">↗ Referensi demo</a>
+      <a class="nav-ref" href="https://quartz-harbor-fair-king.grok.me/" target="_blank" rel="noopener noreferrer">↗ Referensi demo</a>
       <div class="side-foot">
         <label class="loc-label" for="locSelect">Lokasi lapangan</label>
         <select id="locSelect" class="loc-select" aria-label="Lokasi lapangan"></select>
         <button type="button" id="btnSettings">⚙️ Sheets sync</button>
-        <button type="button" id="btnReset">🗂️ Arsip tiket selesai</button>
+        <button type="button" id="btnReset">🗃️ Arsip tiket selesai</button>
         <div class="sync-chip warn" id="syncChip">Sheets: lokal saja</div>
         <div><b>PT Kucindan Usaha Pratama</b></div>
         <div>Multi-lokasi · 06.00–22.00</div>
-        <div style="margin-top:4px;font-size:11px">Roster menunggu daftar final Septiawan</div>
       </div>
     </aside>
-
     <div class="main">
       <header class="topbar">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <button class="menu-toggle" type="button" id="menuToggle" aria-label="Menu">☰ Menu</button>
-          <span id="topDate">—</span>
-          <span>·</span>
-          <span id="topShift">—</span>
+          <span id="topDate">—</span><span>·</span><span id="topShift">—</span>
         </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span class="sync-chip warn" id="syncChipTop" style="display:none"></span>
-          <div class="clock" id="topClock">—</div>
-        </div>
+        <div class="clock" id="topClock">—</div>
       </header>
       <main class="content" id="view"></main>
     </div>
   </div>
-
   <nav class="mobile-nav" aria-label="Menu bawah">
     <button type="button" data-nav="operasi"><span>🗂️</span>Operasi</button>
     <button type="button" data-nav="pegawai"><span>📱</span>HP</button>
@@ -75,16 +68,13 @@
     <button type="button" data-nav="booking"><span>📝</span>Book</button>
     <button type="button" data-nav="lacak"><span>🔎</span>Lacak</button>
   </nav>
-
-  <div class="modal-bg hidden" id="modalBg">
-    <div class="modal" id="modalBody" role="dialog" aria-modal="true"></div>
-  </div>
+  <div class="modal-bg hidden" id="modalBg"><div class="modal" id="modalBody" role="dialog" aria-modal="true"></div></div>
   <div class="toast" id="toast"></div>
-
   <script src="js/sync.js"></script>
   <script src="js/ho-kpi.js"></script>
   <script src="js/ho-anomaly.js"></script>
   <script src="js/ho-input.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/ho-spot-control.js"></script>
 </body>
 </html>
