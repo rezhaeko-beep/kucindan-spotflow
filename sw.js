@@ -1,10 +1,12 @@
 /* SpotFlow Kucindan — basic PWA shell cache (do not cache Apps Script) */
-const CACHE = "spotflow-kucindan-shell-v3";
+const CACHE = "spotflow-kucindan-shell-v5";
 const SHELL = [
   "./",
   "./index.html",
   "./css/styles.css",
   "./js/app.js",
+  "./js/ho-spot-control.js",
+  "./css/ho-spot-control.css",
   "./js/sync.js",
   "./manifest.webmanifest",
   "./icon.svg",
@@ -38,7 +40,6 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  // Never cache Google Apps Script / Sheet endpoints — network only
   if (isAppsScriptHost(url.hostname) || /script\.google\.com/i.test(url.href)) {
     return;
   }
