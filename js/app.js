@@ -120,7 +120,8 @@
       tickets: [],
       bookings: [],
       attendance: [],
-      shiftOpen: null
+      shiftOpen: null,
+      hoLedger: []
     };
   }
   function load() {
@@ -139,6 +140,7 @@
     if (!Array.isArray(s.archive)) s.archive = [];
     if (!Array.isArray(s.bookings)) s.bookings = [];
     if (!Array.isArray(s.attendance)) s.attendance = [];
+    if (!Array.isArray(s.hoLedger)) s.hoLedger = [];
     if (s.shiftOpen === undefined) s.shiftOpen = null;
     for (const ticket of s.tickets) {
       if (!ticket.lokasi) ticket.lokasi = s.activeLokasi;
@@ -593,6 +595,7 @@
       slot: "slot", slots: "slot",
       tim: "tim",
       laporan: "laporan",
+      ho: "ho", kantor: "ho",
       booking: "booking",
       lacak: "lacak"
     };
@@ -1589,17 +1592,135 @@
     if (kode) show(t);
   }
 
+
+  /* ---------- HO Kantor (mounts #ho-kpi-root / #ho-input-root) ---------- */
+  function buildHoApi() {
+    return {
+      LOCS: LOCS, STAFF: STAFF, FEE: FEE, TZ: TZ,
+      currentLokasi: currentLokasi, activeStaff: activeStaff,
+      syncEvent: syncEvent, toast: toast, save: save, state: state,
+      uid: uid, trackCode: trackCode, iso: iso, todayKey: todayKey,
+      shiftOf: shiftOf, esc: esc, rp: rp, rpShort: rpShort,
+      lastPetugasKey: "spotflow_kucindan_ho_petugas",
+      onChanged: function () { render(); }
+    };
+  }
+
+  function renderHoKpiPlaceholder(root) {
+    if (!root) return;
+    var today = todayKey();
+    var tickets = state.tickets || [];
+    var ledger = state.hoLedger || [];
+    var done = tickets.filter(function (t) {
+      return t.valetStatus === "selesai" && t.checkOut && todayKey(new Date(t.checkOut)) === today;
+    });
+    var aktif = tickets.filter(function (t) { return t.valetStatus !== "selesai"; });
+    var jasaTiket = done.reduce(function (s, t) { return s + (t.fee || 0); }, 0);
+    var tipTiket = done.reduce(function (s, t) { return s + (t.tip || 0); }, 0);
+    var ledgerToday = ledger.filter(function (r) {
+      return (r.tanggal || (r.at && todayKey(new Date(r.at)))) === today;
+    });
+    var jasaLed = ledgerToday.reduce(function (s, r) { return s + (r.omzet || 0); }, 0);
+    var tipLed = ledgerToday.reduce(function (s, r) { return s + (r.tip || 0); }, 0);
+    var jasa = jasaTiket + jasaLed;
+    var tip = tipTiket + tipLed;
+    var valetOmzet = done.filter(function (t) { return (t.layanan || "valet") !== "parkir_gate"; })
+      .reduce(function (s, t) { return s + (t.fee || 0); }, 0)
+      + ledgerToday.filter(function (r) { return r.layanan !== "parkir_gate"; })
+        .reduce(function (s, r) { return s + (r.omzet || 0); }, 0);
+    var gateOmzet = done.filter(function (t) { return t.layanan === "parkir_gate"; })
+      .reduce(function (s, t) { return s + (t.fee || 0); }, 0)
+      + ledgerToday.filter(function (r) { return r.layanan === "parkir_gate"; })
+        .reduce(function (s, r) { return s + (r.omzet || 0); }, 0);
+    var byLoc = {};
+    done.forEach(function (t) {
+      var loc = t.lokasi || currentLokasi();
+      byLoc[loc] = byLoc[loc] || { n: 0, jasa: 0 };
+      byLoc[loc].n++; byLoc[loc].jasa += t.fee || 0;
+    });
+    ledgerToday.forEach(function (r) {
+      var loc = r.lokasi || currentLokasi();
+      byLoc[loc] = byLoc[loc] || { n: 0, jasa: 0 };
+      byLoc[loc].jasa += r.omzet || 0;
+    });
+    var locs = Object.keys(byLoc).sort();
+    var locRows = locs.length
+      ? locs.map(function (loc) {
+          return "<tr><td>" + esc(loc) + "</td><td>" + byLoc[loc].n + "</td><td>" + rp(byLoc[loc].jasa) + "</td></tr>";
+        }).join("")
+      : '<tr><td colspan="3">Belum ada data hari ini</td></tr>';
+    root.innerHTML =
+      '<div class="ho-filter"><span style="font-size:12px;font-weight:700;color:var(--mut)">Filter layanan</span>' +
+      '<div class="seg"><button type="button" class="active" data-ho-filter="semua">Semua</button>' +
+      '<button type="button" data-ho-filter="valet">Valet</button>' +
+      '<button type="button" data-ho-filter="parkir_gate">Parkir gate</button></div></div>' +
+      '<div class="ho-kpis">' +
+      '<div class="kpi"><div class="label kas">Omzet hari ini</div><div class="n">' + rpShort(jasa) + '</div><div class="sub">' + rp(jasa) + ' · jasa_kas</div></div>' +
+      '<div class="kpi"><div class="label tip">Tip hari ini</div><div class="n">' + rpShort(tip) + '</div><div class="sub">Tidak masuk kas</div></div>' +
+      '<div class="kpi"><div class="label">Tiket aktif</div><div class="n">' + aktif.length + '</div><div class="sub">Valet + gate</div></div>' +
+      '<div class="kpi"><div class="label">Selesai hari ini</div><div class="n">' + done.length + '</div><div class="sub">Tiket selesai</div></div>' +
+      '</div>' +
+      '<div class="ho-break" style="margin-top:12px">' +
+      '<div class="ho-card"><h2>Breakdown layanan</h2><p class="hint">Valet vs Parkir gate · hari ini</p>' +
+      '<table class="table"><thead><tr><th>Layanan</th><th>Omzet</th></tr></thead><tbody>' +
+      '<tr><td><span class="pill ho-pill-valet">Valet</span></td><td>' + rp(valetOmzet) + '</td></tr>' +
+      '<tr><td><span class="pill ho-pill-gate">Parkir gate</span></td><td>' + rp(gateOmzet) + '</td></tr>' +
+      '</tbody></table></div>' +
+      '<div class="ho-card"><h2>Per lokasi</h2><p class="hint">State lokal (+ ledger HO)</p>' +
+      '<table class="table"><thead><tr><th>Lokasi</th><th>Tiket</th><th>Omzet</th></tr></thead><tbody>' +
+      locRows + '</tbody></table></div></div>';
+  }
+
+  function renderHo() {
+    document.body.classList.add("ho-mode");
+    var st = activeStaff();
+    document.getElementById("view").innerHTML =
+      '<div class="ho-wrap">' +
+      '<div class="page-head"><div>' +
+      '<p class="eyebrow">Kantor pusat · SpotFlow Kucindan</p>' +
+      '<h1>Dashboard HO</h1>' +
+      '<p>Parkir + valet · input cepat · ' + esc(currentLokasi()) + ' · ' + esc(st.name) + '</p>' +
+      '</div><div class="btn-row">' +
+      '<button class="btn" type="button" id="hoBtnHydrate">⬇️ Ambil dari Sheet</button>' +
+      '<button class="btn" type="button" id="hoBtnOperasi">Ke Operasi</button>' +
+      '</div></div>' +
+      '<div id="ho-kpi-root"></div>' +
+      '<div id="ho-input-root"></div>' +
+      '</div>';
+    var kpiRoot = document.getElementById("ho-kpi-root");
+    var inputRoot = document.getElementById("ho-input-root");
+    var api = buildHoApi();
+    if (window.SpotFlowHoKpi && typeof window.SpotFlowHoKpi.mount === "function") {
+      window.SpotFlowHoKpi.mount(kpiRoot);
+    } else if (window.SpotFlowHoKpi && typeof window.SpotFlowHoKpi.render === "function") {
+      window.SpotFlowHoKpi.render(kpiRoot);
+    } else {
+      renderHoKpiPlaceholder(kpiRoot);
+    }
+    if (window.SpotFlowHoInput && typeof window.SpotFlowHoInput.render === "function") {
+      window.SpotFlowHoInput.render(inputRoot, api);
+    } else if (inputRoot) {
+      inputRoot.innerHTML = '<div class="ho-empty">Modul input HO belum dimuat (js/ho-input.js).</div>';
+    }
+    var bh = document.getElementById("hoBtnHydrate");
+    if (bh) bh.onclick = function () { hydrateFromSheet(); };
+    var bo = document.getElementById("hoBtnOperasi");
+    if (bo) bo.onclick = function () { go("operasi"); };
+  }
+
   function render() {
     parseRoute();
     setNavActive();
     renderTopbar();
     document.getElementById("sidebar").classList.remove("open");
+    if (route.page !== "ho") document.body.classList.remove("ho-mode");
     const pages = {
       operasi: renderOperasi,
       pegawai: renderPegawai,
       slot: renderSlot,
       tim: renderTim,
       laporan: () => renderLaporan(),
+      ho: renderHo,
       booking: renderBooking,
       lacak: renderLacak
     };
